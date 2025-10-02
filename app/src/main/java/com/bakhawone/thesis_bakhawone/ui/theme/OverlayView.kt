@@ -18,9 +18,7 @@ class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs)
         Color.RED,
         Color.GREEN,
         Color.BLUE,
-        Color.YELLOW,
-        Color.CYAN,
-        Color.MAGENTA
+        Color.YELLOW
     )
 
     private val boxPaint = Paint().apply {

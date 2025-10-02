@@ -45,8 +45,12 @@
             android:exported="false"
             android:theme="@style/Theme.Thesisbakhawone" />
 
-        <!-- Camera Scanner Activity -->
-        <activity android:name=".CamActivity" />
+        <!-- Camera Activity -->
+        <activity
+            android:name=".CameraActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Thesisbakhawone" />
     </application>
+
 
 </manifest>
