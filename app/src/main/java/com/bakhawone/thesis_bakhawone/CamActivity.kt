@@ -1,28 +1,20 @@
 package com.bakhawone.thesis_bakhawone
 
 import android.Manifest
-import android.app.Activity
-import android.content.Intent
 import android.graphics.*
-import android.net.Uri
 import android.os.Bundle
-import android.provider.MediaStore
 import android.util.Log
 import android.widget.Button
-import android.widget.ImageView
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.Interpreter 
+import org.tensorflow.lite.support.common.FileUtil
 import java.io.ByteArrayOutputStream
-import java.io.FileInputStream
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -31,10 +23,8 @@ import kotlin.math.min
 class CamActivity : AppCompatActivity() {
 
     private lateinit var previewView: PreviewView
-    private lateinit var imgUploaded: ImageView
     private lateinit var overlayView: OverlayView
     private lateinit var tvPrediction: TextView
-    private lateinit var btnUpload: Button
     private lateinit var btnScan: Button
 
     private val TAG = "CamActivity"
@@ -42,74 +32,29 @@ class CamActivity : AppCompatActivity() {
     private val LABELS_FILE = "labels.txt"
 
     private var interpreterBest: Interpreter? = null
-    private var interpreterLast: Interpreter? = null
     private var labels: List<String> = emptyList()
 
     private val reqExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-    private val requestedParts = listOf("eye", "caudal_fin", "pectoral_fin", "skin_texture")
-
-    // ------------------ IMAGE PICKER ------------------
-    private val pickImageLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
-        if (res.resultCode == Activity.RESULT_OK && res.data != null) {
-            val uri: Uri? = res.data!!.data
-            uri?.let {
-                try {
-                    val bitmap = MediaStore.Images.Media.getBitmap(contentResolver, uri)
-                    imgUploaded.setImageBitmap(bitmap)
-                    imgUploaded.visibility = ImageView.VISIBLE
-                    previewView.visibility = PreviewView.GONE
-
-                    imgUploaded.post {
-                        val dispRect = computeImageViewDisplayRect(imgUploaded, bitmap)
-                        reqExecutor.execute {
-                            val (boxes, labelsOut) = detectWithBothModels(bitmap)
-                            runOnUiThread {
-                                overlayView.setResults(boxes, labelsOut, bitmap.width, bitmap.height, dispRect)
-                                //val predictedShelfLife = ShelfLifePredictor.predictShelfLife(labelsOut)
-
-                                if (labelsOut.isNotEmpty()) {
-                                    //tvPrediction.text = "Detected: ${labelsOut.joinToString(", ")}\nShelf-Life: $predictedShelfLife"
-                                    tvPrediction.setTextColor(Color.YELLOW) // shelf-life text in yellow
-                                } else {
-                                    tvPrediction.text = "No detection"
-                                    tvPrediction.setTextColor(Color.RED)
-                                }
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "load image failed", e)
-                }
-            }
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.cam_activity)
 
         previewView = findViewById(R.id.previewView)
-        imgUploaded = findViewById(R.id.imgUploaded)
         overlayView = findViewById(R.id.overlayView)
         tvPrediction = findViewById(R.id.tvPrediction)
         btnScan = findViewById(R.id.btnScan)
 
-        btnUpload.setOnClickListener {
-            val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-            pickImageLauncher.launch(intent)
-        }
-
         btnScan.setOnClickListener {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 123)
             } else {
-                imgUploaded.visibility = ImageView.GONE
-                previewView.visibility = PreviewView.VISIBLE
                 startCamera()
             }
         }
 
-        // Load labels.txt
+        // Load labels.txt from assets
         try {
             labels = loadLabels(LABELS_FILE)
         } catch (e: Exception) {
@@ -117,32 +62,15 @@ class CamActivity : AppCompatActivity() {
             Log.w(TAG, "labels.txt load failed: ${e.message}")
         }
 
-        // Load models
+        // Load model from ml/
         try {
-            interpreterBest = Interpreter(loadModelFile("best_float32.tflite"))
-            interpreterLast = Interpreter(loadModelFile("last_float32.tflite"))
-            tvPrediction.text = "Models loaded"
+            interpreterBest = Interpreter(FileUtil.loadMappedFile(this, "best_float32.tflite"))
+            tvPrediction.text = "Model loaded"
         } catch (e: Exception) {
             interpreterBest = null
-            interpreterLast = null
             tvPrediction.text = "Model load failed"
             Log.e(TAG, "Model load error", e)
         }
-    }
-
-    // ------------------ UTILS ------------------
-    private fun computeImageViewDisplayRect(iv: ImageView, bmp: Bitmap): RectF {
-        val vw = iv.width.toFloat()
-        val vh = iv.height.toFloat()
-        val iw = bmp.width.toFloat()
-        val ih = bmp.height.toFloat()
-        if (vw == 0f || vh == 0f) return RectF(0f, 0f, vw, vh)
-        val scale = min(vw / iw, vh / ih)
-        val dispW = iw * scale
-        val dispH = ih * scale
-        val left = (vw - dispW) / 2f
-        val top = (vh - dispH) / 2f
-        return RectF(left, top, left + dispW, top + dispH)
     }
 
     private data class LetterboxResult(val bitmap: Bitmap, val scale: Float, val dx: Int, val dy: Int)
@@ -153,9 +81,7 @@ class CamActivity : AppCompatActivity() {
         val resized = Bitmap.createScaledBitmap(src, newW, newH, true)
         val output = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
-        val p = Paint()
-        p.color = Color.BLACK
-        canvas.drawRect(0f, 0f, targetSize.toFloat(), targetSize.toFloat(), p)
+        canvas.drawColor(Color.BLACK)
         val dx = (targetSize - newW) / 2
         val dy = (targetSize - newH) / 2
         canvas.drawBitmap(resized, dx.toFloat(), dy.toFloat(), null)
@@ -164,11 +90,14 @@ class CamActivity : AppCompatActivity() {
 
     private data class RawDet(val box: RectF, val cls: Int, val score: Float)
 
-    // ------------------ DETECTION ------------------
-    private fun detectWithBothModels(bitmap: Bitmap): Pair<List<RectF>, List<String>> {
-        val detBest = detectWithInterpreter(bitmap, interpreterBest)
-        val detLast = detectWithInterpreter(bitmap, interpreterLast)
-        return ensembleDetections(detBest.first, detLast.first)
+    // ---------- DETECTION ----------
+    private fun detect(bitmap: Bitmap): Pair<List<RectF>, List<String>> {
+        val dets = detectWithInterpreter(bitmap, interpreterBest)
+        val boxes = dets.first.map { it.box }
+        val labelsOut = dets.first.map { idx ->
+            if (idx.cls < labels.size) labels[idx.cls] else "Class ${idx.cls}"
+        }
+        return Pair(boxes, labelsOut)
     }
 
     private fun detectWithInterpreter(bitmap: Bitmap, interp: Interpreter?): Pair<List<RawDet>, List<String>> {
@@ -191,7 +120,7 @@ class CamActivity : AppCompatActivity() {
         interp.run(input, output)
 
         val numClasses = 20 - 4
-        val rawDetections = ArrayList<RawDet>(200)
+        val rawDetections = ArrayList<RawDet>()
 
         for (i in 0 until 8400) {
             val cx = output[0][0][i] * IMAGE_SIZE
@@ -222,24 +151,7 @@ class CamActivity : AppCompatActivity() {
         return Pair(rawDetections, emptyList())
     }
 
-    private fun ensembleDetections(det1: List<RawDet>, det2: List<RawDet>): Pair<List<RectF>, List<String>> {
-        val combinedBoxes = mutableListOf<RectF>()
-        val combinedLabels = mutableListOf<String>()
-
-        for (part in requestedParts) {
-            val indicesForPart = labels.mapIndexedNotNull { idx, lbl -> if (lbl.endsWith("_$part")) idx else null }
-            val candidates = det1.filter { it.cls in indicesForPart } + det2.filter { it.cls in indicesForPart }
-            val best = candidates.maxByOrNull { it.score }
-            if (best != null) {
-                combinedBoxes.add(best.box)
-                val labelName = if (best.cls < labels.size) labels[best.cls] else "Class ${best.cls}"
-                combinedLabels.add("$labelName ${(best.score * 100).toInt()}%")
-            }
-        }
-        return Pair(combinedBoxes, combinedLabels)
-    }
-
-    // ------------------ CAMERAX ------------------
+    // ---------- CAMERA ----------
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
@@ -253,19 +165,15 @@ class CamActivity : AppCompatActivity() {
                     it.setAnalyzer(reqExecutor) { imageProxy ->
                         val bmp = imageProxyToBitmap(imageProxy)
                         if (bmp != null) {
-                            val (boxes, labelsOut) = detectWithBothModels(bmp)
-                            if (boxes.isNotEmpty()) {
-                                runOnUiThread {
-                                    overlayView.setResults(boxes, labelsOut, bmp.width, bmp.height, null)
-                                    //val predictedShelfLife = ShelfLifePredictor.predictShelfLife(labelsOut)
-
-                                    if (labelsOut.isNotEmpty()) {
-                                        //tvPrediction.text = "Detected: ${labelsOut.joinToString(", ")}\nShelf-Life: $predictedShelfLife"
-                                        tvPrediction.setTextColor(Color.YELLOW)
-                                    } else {
-                                        tvPrediction.text = "No detection"
-                                        tvPrediction.setTextColor(Color.RED)
-                                    }
+                            val (boxes, labelsOut) = detect(bmp)
+                            runOnUiThread {
+                                overlayView.setResults(boxes, labelsOut, bmp.width, bmp.height, null)
+                                if (labelsOut.isNotEmpty()) {
+                                    tvPrediction.setTextColor(Color.YELLOW)
+                                    tvPrediction.text = labelsOut.joinToString()
+                                } else {
+                                    tvPrediction.text = "No detection"
+                                    tvPrediction.setTextColor(Color.RED)
                                 }
                             }
                         }
@@ -308,13 +216,7 @@ class CamActivity : AppCompatActivity() {
         }
     }
 
-    // ------------------ ASSET LOADERS ------------------
-    private fun loadModelFile(name: String): MappedByteBuffer {
-        val fd = assets.openFd(name)
-        val fis = FileInputStream(fd.fileDescriptor)
-        return fis.channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
-    }
-
+    // ---------- LABELS ----------
     private fun loadLabels(filename: String): List<String> {
         val out = mutableListOf<String>()
         assets.open(filename).bufferedReader().useLines { lines -> lines.forEach { out.add(it.trim()) } }
@@ -325,6 +227,5 @@ class CamActivity : AppCompatActivity() {
         super.onDestroy()
         reqExecutor.shutdown()
         interpreterBest?.close()
-        interpreterLast?.close()
     }
 }
