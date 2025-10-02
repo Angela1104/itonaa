@@ -13,16 +13,31 @@ class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs)
     private var imageHeight: Int = 1
     private var displayRect: RectF? = null
 
+    // Different colors for better visual distinction
+    private val colors = listOf(
+        Color.RED,
+        Color.GREEN,
+        Color.BLUE,
+        Color.YELLOW,
+        Color.CYAN,
+        Color.MAGENTA
+    )
+
     private val boxPaint = Paint().apply {
-        color = Color.RED
         style = Paint.Style.STROKE
         strokeWidth = 4f
     }
 
+    private val textBgPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#CC000000") // Semi-transparent black background
+    }
+
     private val textPaint = Paint().apply {
         color = Color.WHITE
-        textSize = 40f
+        textSize = 36f   // ✅ updated from 40f to 36f
         typeface = Typeface.DEFAULT_BOLD
+        isAntiAlias = true
     }
 
     fun setResults(
@@ -37,6 +52,12 @@ class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs)
         this.imageWidth = imgWidth
         this.imageHeight = imgHeight
         this.displayRect = displayRect
+        invalidate() // Request redraw
+    }
+
+    fun clear() {
+        boxes = emptyList()
+        labels = emptyList()
         invalidate()
     }
 
@@ -44,22 +65,50 @@ class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs)
         super.onDraw(canvas)
         if (boxes.isEmpty()) return
 
-        val scaleX = (displayRect?.width() ?: width.toFloat()) / imageWidth
-        val scaleY = (displayRect?.height() ?: height.toFloat()) / imageHeight
-        val dx = displayRect?.left ?: 0f
-        val dy = displayRect?.top ?: 0f
+        // Simplified scaling - use full view size
+        val scaleX = width.toFloat() / imageWidth
+        val scaleY = height.toFloat() / imageHeight
+        val dx = 0f
+        val dy = 0f
 
         for (i in boxes.indices) {
             val box = boxes[i]
-            val label = labels.getOrNull(i) ?: ""
+            val label = labels.getOrNull(i) ?: "Unknown"
 
+            // Use different color for each detection
+            boxPaint.color = colors[i % colors.size]
+
+            // Scale coordinates to view size
             val left = box.left * scaleX + dx
             val top = box.top * scaleY + dy
             val right = box.right * scaleX + dx
             val bottom = box.bottom * scaleY + dy
 
-            canvas.drawRect(left, top, right, bottom, boxPaint)
-            canvas.drawText(label, left, top - 10f, textPaint)
+            // Only draw if box is within visible bounds
+            if (right > 0 && left < width && bottom > 0 && top < height) {
+                // Draw bounding box
+                canvas.drawRect(left, top, right, bottom, boxPaint)
+
+                // Draw label with background for better readability
+                val textWidth = textPaint.measureText(label)
+                val textHeight = textPaint.descent() - textPaint.ascent()
+
+                // Ensure text doesn't go off screen
+                val textLeft = left.coerceAtLeast(0f)
+                val textTop = (top - 10f).coerceAtLeast(textHeight + 5f)
+
+                // Draw text background
+                canvas.drawRect(
+                    textLeft,
+                    textTop - textHeight - 5f,
+                    textLeft + textWidth + 20f,
+                    textTop,
+                    textBgPaint
+                )
+
+                // Draw text
+                canvas.drawText(label, textLeft + 10f, textTop - 10f, textPaint)
+            }
         }
     }
 }

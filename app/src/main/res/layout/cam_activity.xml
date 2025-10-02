@@ -29,16 +29,28 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:padding="16dp">
+        android:padding="16dp"
+        android:weightSum="2">
 
+        <!-- Start camera detection -->
         <Button
             android:id="@+id/btnScan"
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
             android:text="Start Detection" />
+
+        <!-- Upload image -->
+        <Button
+            android:id="@+id/btnUpload"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Upload Image" />
+
     </LinearLayout>
 
+    <!-- Prediction text -->
     <TextView
         android:id="@+id/tvPrediction"
         android:layout_width="wrap_content"
