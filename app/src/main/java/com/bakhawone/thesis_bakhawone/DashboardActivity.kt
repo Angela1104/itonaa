@@ -38,6 +38,8 @@ import androidx.compose.material3.OutlinedTextField
 import org.osmdroid.views.overlay.Polygon
 import android.graphics.Color
 import kotlin.math.*
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 
 // Data class to store pinned locations with name/address
 data class PinnedLocation(
@@ -47,6 +49,32 @@ data class PinnedLocation(
     val longitude: Double,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+// Storage utility class
+class LocationStorage(private val context: android.content.Context) {
+    private val sharedPreferences = context.getSharedPreferences("pinned_locations", android.content.Context.MODE_PRIVATE)
+    private val gson = Gson()
+    private val key = "pinned_locations_list"
+
+    fun saveLocations(locations: List<PinnedLocation>) {
+        val jsonString = gson.toJson(locations)
+        sharedPreferences.edit().putString(key, jsonString).apply()
+    }
+
+    fun loadLocations(): List<PinnedLocation> {
+        val jsonString = sharedPreferences.getString(key, null)
+        return if (jsonString != null) {
+            val type = object : TypeToken<List<PinnedLocation>>() {}.type
+            gson.fromJson(jsonString, type) ?: emptyList()
+        } else {
+            emptyList()
+        }
+    }
+
+    fun clearLocations() {
+        sharedPreferences.edit().remove(key).apply()
+    }
+}
 
 class DashboardActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,9 +96,22 @@ class DashboardActivity : ComponentActivity() {
 fun DashboardApp() {
     var selectedIndex by remember { mutableIntStateOf(0) }
     var selectedRecordTab by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
 
-    // Store pinned locations at the top level - this will be shared across all screens
-    val pinnedLocations = remember { mutableStateListOf<PinnedLocation>() }
+    // Store pinned locations at the top level with persistent storage
+    val pinnedLocations = remember {
+        mutableStateListOf<PinnedLocation>().apply {
+            // Load initial locations from storage
+            val storage = LocationStorage(context)
+            addAll(storage.loadLocations())
+        }
+    }
+
+    // Save locations whenever they change
+    LaunchedEffect(pinnedLocations.size) {
+        val storage = LocationStorage(context)
+        storage.saveLocations(pinnedLocations)
+    }
 
     val items = listOf(
         BottomNavItem("Home", Icons.Filled.Home),

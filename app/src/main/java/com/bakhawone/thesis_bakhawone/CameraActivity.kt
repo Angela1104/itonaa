@@ -11,7 +11,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,6 +33,7 @@ class CameraActivity : ComponentActivity() {
     private val TAG = "CameraActivity"
     private val IMAGE_SIZE = 640
     private val LABELS_FILE = "labels.txt"
+    private val CONFIDENCE_THRESHOLD = 0.5f
 
     private var interpreter: Interpreter? = null
     private var labels: List<String> = emptyList()
@@ -75,13 +75,21 @@ class CameraActivity : ComponentActivity() {
     fun CameraScreen(interpreter: Interpreter?, labels: List<String>) {
         val context = LocalContext.current
         var previewView by remember { mutableStateOf<PreviewView?>(null) }
-        var predictionText by remember { mutableStateOf("Detection") }
+        var overlayView by remember { mutableStateOf<OverlayView?>(null) }
+        var predictionText by remember { mutableStateOf("Starting detection...") }
+        var isDetecting by remember { mutableStateOf(true) }
 
         val cameraPermissionLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission()
         ) { granted ->
             if (granted) {
-                previewView?.let { startCamera(it, interpreter, labels) { predictionText = it } }
+                previewView?.let {
+                    overlayView?.let { ov ->
+                        startCamera(it, ov, interpreter, labels) { text, detections ->
+                            predictionText = text
+                        }
+                    }
+                }
             } else {
                 predictionText = "Camera permission denied"
             }
@@ -91,49 +99,105 @@ class CameraActivity : ComponentActivity() {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
                 == android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
-                previewView?.let { startCamera(it, interpreter, labels) { predictionText = it } }
+                previewView?.let {
+                    overlayView?.let { ov ->
+                        startCamera(it, ov, interpreter, labels) { text, detections ->
+                            predictionText = text
+                        }
+                    }
+                }
             } else {
                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
             }
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            AndroidView(factory = { ctx ->
-                PreviewView(ctx).also { pv -> previewView = pv }
-            }, modifier = Modifier.fillMaxSize())
+            // Camera Preview
+            AndroidView(
+                factory = { ctx ->
+                    PreviewView(ctx).also { pv -> previewView = pv }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
 
+            // Overlay View for bounding boxes
+            AndroidView(
+                factory = { ctx ->
+                    OverlayView(ctx, null).also { ov ->
+                        overlayView = ov
+                        // Set the label colors
+                        ov.setLabelColors(
+                            aliveRhizophoraColor = Color.GREEN,
+                            aliveTrunkColor = Color.GREEN,
+                            deadRhizophoraColor = Color.RED,
+                            deadTrunkColor = Color.RED
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Detection status text
             Text(
                 text = predictionText,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(16.dp),
-                color = ComposeColor.White
+                color = ComposeColor.White,
+                style = MaterialTheme.typography.bodyMedium
             )
 
+            // Control buttons
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Button(onClick = {
-                    previewView?.let { startCamera(it, interpreter, labels) { predictionText = it } }
-                }) { Text("Start Detection") }
+                Button(
+                    onClick = {
+                        isDetecting = true
+                        previewView?.let {
+                            overlayView?.let { ov ->
+                                startCamera(it, ov, interpreter, labels) { text, detections ->
+                                    predictionText = text
+                                }
+                            }
+                        }
+                    },
+                    enabled = !isDetecting
+                ) {
+                    Text("Start Detection")
+                }
+
+                Button(
+                    onClick = {
+                        isDetecting = false
+                        overlayView?.clear()
+                        predictionText = "Detection paused"
+                    },
+                    enabled = isDetecting
+                ) {
+                    Text("Pause Detection")
+                }
             }
         }
     }
 
     private fun startCamera(
         previewView: PreviewView,
+        overlayView: OverlayView,
         interpreter: Interpreter?,
         labels: List<String>,
-        onPrediction: (String) -> Unit
+        onPrediction: (String, List<Detection>) -> Unit
     ) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val provider = cameraProviderFuture.get()
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-            val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
 
             val analyzer = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -142,11 +206,24 @@ class CameraActivity : ComponentActivity() {
                     analysis.setAnalyzer(reqExecutor) { imageProxy ->
                         val bitmap = yuvToRgb(imageProxy)
                         bitmap?.let {
-                            val dets = detect(it, interpreter, labels)
-                            onPrediction(
-                                if (dets.isNotEmpty()) dets.joinToString { d -> d.label }
-                                else "Scanning..."
+                            val detections = detect(it, interpreter, labels)
+
+                            // Update overlay with detections
+                            overlayView.setResults(
+                                boxes = detections.map { it.box },
+                                labels = detections.map { it.label },
+                                imgWidth = bitmap.width,
+                                imgHeight = bitmap.height
                             )
+
+                            // Update prediction text
+                            val detectionText = if (detections.isNotEmpty()) {
+                                "Detected: ${detections.size} trunks"
+                            } else {
+                                "Scanning for trunks..."
+                            }
+                            onPrediction(detectionText, detections)
+
                             it.recycle()
                         }
                         imageProxy.close()
@@ -158,7 +235,7 @@ class CameraActivity : ComponentActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    @OptIn(androidx.camera.core.ExperimentalGetImage::class)
+    @OptIn(ExperimentalGetImage::class)
     private fun yuvToRgb(image: ImageProxy): Bitmap? {
         val yuv = image.image ?: return null
         val yBuffer = yuv.planes[0].buffer
@@ -174,7 +251,7 @@ class CameraActivity : ComponentActivity() {
         vBuffer.get(nv21, ySize, vSize)
         uBuffer.get(nv21, ySize + vSize, uSize)
 
-        val yuvImage = android.graphics.YuvImage(nv21, android.graphics.ImageFormat.NV21, image.width, image.height, null)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
         val out = java.io.ByteArrayOutputStream()
         yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 100, out)
         val bytes = out.toByteArray()
@@ -185,6 +262,7 @@ class CameraActivity : ComponentActivity() {
 
     private fun detect(bitmap: Bitmap, interpreter: Interpreter?, labels: List<String>): List<Detection> {
         if (interpreter == null) return emptyList()
+
         // Letterbox + normalize
         val lb = letterboxImage(bitmap, IMAGE_SIZE)
         val input = Array(1) { Array(IMAGE_SIZE) { Array(IMAGE_SIZE) { FloatArray(3) } } }
@@ -198,12 +276,13 @@ class CameraActivity : ComponentActivity() {
             }
         }
 
-        // Adjust output shape as per your model
+        // Adjust output shape as per your model (this might need adjustment based on your model)
         val output = Array(1) { Array(8) { FloatArray(8400) } }
         interpreter.run(input, output)
 
         val detections = mutableListOf<Detection>()
         val grid = 8400
+
         for (i in 0 until grid) {
             val x = output[0][0][i]
             val y = output[0][1][i]
@@ -212,6 +291,7 @@ class CameraActivity : ComponentActivity() {
 
             var bestClass = -1
             var bestScore = 0f
+
             for (c in labels.indices) {
                 val sc = output[0][c + 4][i]
                 if (sc > bestScore) {
@@ -220,14 +300,21 @@ class CameraActivity : ComponentActivity() {
                 }
             }
 
-            if (bestScore > 0.1f && bestClass in labels.indices) {
+            if (bestScore > CONFIDENCE_THRESHOLD && bestClass in labels.indices) {
                 val left = (x - w / 2) * bitmap.width
                 val top = (y - h / 2) * bitmap.height
                 val right = (x + w / 2) * bitmap.width
                 val bottom = (y + h / 2) * bitmap.height
-                if (right > left && bottom > top) {
-                    detections.add(Detection(RectF(left, top, right, bottom),
-                        "${labels[bestClass]} (${String.format("%.1f", bestScore * 100)}%)", bestScore))
+
+                if (right > left && bottom > top && left >= 0 && top >= 0 && right <= bitmap.width && bottom <= bitmap.height) {
+                    val labelName = labels[bestClass]
+                    detections.add(
+                        Detection(
+                            RectF(left, top, right, bottom),
+                            "$labelName (${String.format("%.1f", bestScore * 100)}%)",
+                            bestScore
+                        )
+                    )
                 }
             }
         }
@@ -237,6 +324,7 @@ class CameraActivity : ComponentActivity() {
     }
 
     private data class LetterboxResult(val bitmap: Bitmap, val scale: Float, val dx: Int, val dy: Int)
+
     private fun letterboxImage(src: Bitmap, target: Int): LetterboxResult {
         val scale = min(target.toFloat() / src.width, target.toFloat() / src.height)
         val newW = (src.width * scale).toInt()

@@ -47,6 +47,8 @@ dependencies {
     implementation("com.google.android.material:material:1.10.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.0")
 
+    implementation("com.google.code.gson:gson:2.10.1")
+
     // Lifecycle & Activity
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
