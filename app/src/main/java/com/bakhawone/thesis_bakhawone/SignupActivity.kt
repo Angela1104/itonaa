@@ -73,66 +73,67 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+
     val context = LocalContext.current
-    val activity = context as? ComponentActivity
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(modifier = Modifier.height(60.dp))
+
         Image(
             painter = painterResource(id = R.drawable.bakhawone),
             contentDescription = "App Logo",
             modifier = Modifier
-                .size(250.dp)
+                .padding(top = 25.dp)
+                .size(290.dp)
                 .padding(bottom = 32.dp)
-        )
-
-        Text(
-            text = "Create Account",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 24.dp)
         )
 
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Full Name
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                placeholder = { Text("Full Name", fontSize = 16.sp) },
+                placeholder = { Text("Full Name", fontSize = 20.sp) },
                 singleLine = true,
                 shape = RoundedCornerShape(50.dp),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Text,
                     imeAction = ImeAction.Next
                 ),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
             )
 
+            // Email
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
-                placeholder = { Text("Email", fontSize = 16.sp) },
+                placeholder = { Text("Email", fontSize = 20.sp) },
                 singleLine = true,
                 shape = RoundedCornerShape(50.dp),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Email,
                     imeAction = ImeAction.Next
                 ),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
             )
 
+            // Password
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
-                placeholder = { Text("Password", fontSize = 16.sp) },
+                placeholder = { Text("Password", fontSize = 20.sp) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 shape = RoundedCornerShape(50.dp),
@@ -140,13 +141,16 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Next
                 ),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
             )
 
+            // Confirm Password
             OutlinedTextField(
                 value = confirmPassword,
                 onValueChange = { confirmPassword = it },
-                placeholder = { Text("Confirm Password", fontSize = 16.sp) },
+                placeholder = { Text("Confirm Password", fontSize = 20.sp) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 shape = RoundedCornerShape(50.dp),
@@ -154,30 +158,20 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Done
                 ),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
             )
-
-            // Password requirements hint
-            if (password.isNotEmpty()) {
-                Text(
-                    text = if (password.length < 6) "Password must be at least 6 characters"
-                    else "✓ Password meets requirements",
-                    fontSize = 12.sp,
-                    color = if (password.length < 6) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-            }
 
             // Password match indicator
             if (password.isNotEmpty() && confirmPassword.isNotEmpty()) {
                 Text(
-                    text = if (password == confirmPassword) "✓ Passwords match"
+                    text = if (password == confirmPassword)
+                        "✓ Passwords match"
                     else "✗ Passwords do not match",
-                    fontSize = 12.sp,
-                    color = if (password == confirmPassword) MaterialTheme.colorScheme.primary
+                    fontSize = 14.sp,
+                    color = if (password == confirmPassword)
+                        MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.error,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -185,8 +179,7 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
+            // Sign Up Button
             Button(
                 onClick = {
                     if (isLoading) return@Button
@@ -196,7 +189,6 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                     val trimmedPassword = password.trim()
                     val trimmedConfirmPassword = confirmPassword.trim()
 
-                    // Validation
                     when {
                         trimmedName.isEmpty() || trimmedEmail.isEmpty() ||
                                 trimmedPassword.isEmpty() || trimmedConfirmPassword.isEmpty() -> {
@@ -212,7 +204,7 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                             return@Button
                         }
                         !isValidEmail(trimmedEmail) -> {
-                            Toast.makeText(context, "Please enter a valid email address", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                     }
@@ -224,7 +216,6 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                             if (task.isSuccessful) {
                                 val user = auth.currentUser
                                 if (user != null) {
-                                    // Update user profile with display name
                                     val profileUpdates = UserProfileChangeRequest.Builder()
                                         .setDisplayName(trimmedName)
                                         .build()
@@ -232,7 +223,6 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                                     user.updateProfile(profileUpdates)
                                         .addOnCompleteListener { profileTask ->
                                             if (profileTask.isSuccessful) {
-                                                // Store additional user data in Firestore
                                                 val userData = hashMapOf(
                                                     "name" to trimmedName,
                                                     "email" to trimmedEmail,
@@ -240,24 +230,23 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                                                     "userId" to user.uid
                                                 )
 
-                                                db.collection("users")
-                                                    .document(user.uid)
+                                                db.collection("users").document(user.uid)
                                                     .set(userData)
                                                     .addOnSuccessListener {
                                                         isLoading = false
                                                         Toast.makeText(
                                                             context,
-                                                            "Account created successfully!",
+                                                            "Signup successful",
                                                             Toast.LENGTH_SHORT
                                                         ).show()
-                                                        activity?.startActivity(
-                                                            Intent(activity, MainActivity::class.java)
-                                                        )
-                                                        activity?.finish()
+
+                                                        // ✅ Navigate to DashboardActivity
+                                                        val intent = Intent(context, DashboardActivity::class.java)
+                                                        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                                        context.startActivity(intent)
                                                     }
                                                     .addOnFailureListener { e ->
                                                         isLoading = false
-                                                        // If Firestore fails, delete the auth user
                                                         user.delete()
                                                         Toast.makeText(
                                                             context,
@@ -270,73 +259,66 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                                                 user.delete()
                                                 Toast.makeText(
                                                     context,
-                                                    "Failed to create user profile",
+                                                    "Failed to create profile",
                                                     Toast.LENGTH_SHORT
                                                 ).show()
                                             }
                                         }
-                                } else {
-                                    isLoading = false
-                                    Toast.makeText(context, "User creation failed", Toast.LENGTH_SHORT).show()
                                 }
                             } else {
                                 isLoading = false
-                                val errorMessage = when {
+                                val errorMsg = when {
                                     task.exception?.message?.contains("email address is already") == true ->
-                                        "Email is already registered"
+                                        "Email already registered"
                                     task.exception?.message?.contains("badly formatted") == true ->
                                         "Invalid email format"
                                     else -> task.exception?.localizedMessage ?: "Signup failed"
                                 }
-                                Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
                             }
                         }
                 },
-                enabled = !isLoading && name.isNotBlank() && email.isNotBlank() &&
-                        password.isNotBlank() && confirmPassword.isNotBlank() &&
-                        password.length >= 6 && password == confirmPassword,
+                enabled = !isLoading,
                 shape = RoundedCornerShape(50.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier
-                    .fillMaxWidth(0.8f)
+                    .width(180.dp)
                     .padding(vertical = 16.dp)
                     .height(50.dp)
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
                         color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp
+                        modifier = Modifier.size(20.dp)
                     )
                 } else {
                     Text(
-                        "CREATE ACCOUNT",
-                        fontSize = 18.sp,
+                        "SIGN UP",
+                        fontSize = 23.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                 }
             }
 
+            // Navigate to Login
             Text(
                 text = "Already have an account? Log in",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.primary,
+                fontSize = 18.sp,
+                color = MaterialTheme.colorScheme.onBackground,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .padding(top = 20.dp)
+                    .padding(top = 16.dp)
                     .clickable {
-                        activity?.startActivity(Intent(activity, MainActivity::class.java))
-                        activity?.finish()
+                        val intent = Intent(context, MainActivity::class.java)
+                        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        context.startActivity(intent)
                     }
             )
         }
     }
 }
 
-// Email validation function
 private fun isValidEmail(email: String): Boolean {
     val emailRegex = "^[A-Za-z](.*)([@]{1})(.{1,})(\\.)(.{1,})".toRegex()
     return email.matches(emailRegex)
