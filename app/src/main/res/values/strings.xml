@@ -1,4 +1,3 @@
 <resources>
-    <string name="app_name">thesis-bakhawone</string>
-    <string name="start_scanning">Start Detection</string>
+    <string name="app_name">BakhawOne</string>
 </resources>
