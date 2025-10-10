@@ -9,6 +9,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.background
+import android.content.Context
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -33,6 +35,7 @@ import androidx.compose.ui.text.input.*
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.google.firebase.auth.FirebaseAuth
@@ -176,7 +179,7 @@ fun MiniRecordsPanel(
 
     Card(
         modifier = modifier,
-        elevation = CardDefaults.cardElevation(4.dp),
+        elevation = CardDefaults.cardElevation(10.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
     ) {
         Row(
@@ -615,7 +618,7 @@ fun RecordScreen(
         Divider(
             thickness = 1.dp,
             color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f),
-            modifier = Modifier.padding(vertical = 8.dp)
+            modifier = Modifier.padding(vertical = 0.dp)
         )
 
         Box(
@@ -733,17 +736,41 @@ fun ReportsScreen(pinnedLocations: List<PinnedLocation>) {
         }
     }
 }
-
 @Composable
-fun GISScreen() {
+fun GISScreen(context: Context = LocalContext.current) {
+    // Height of your subtab row + padding + divider (adjust if needed)
+    val topBoundary = 0.dp
+
     Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = topBoundary)
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        Text("GIS Map content")
+        AndroidView(
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    // Standard OSM setup
+                    setTileSource(TileSourceFactory.MAPNIK)
+                    setBuiltInZoomControls(true)
+                    setMultiTouchControls(true)
+
+                    // Optional: restrict area (Puerto Princesa)
+                    val puertoPrincesaBounds = BoundingBox(10.5, 118.85, 9.6, 117.8)
+                    setScrollableAreaLimitDouble(puertoPrincesaBounds)
+
+                    // Default center + zoom
+                    controller.setZoom(12.0)
+                    controller.setCenter(GeoPoint(9.7439, 118.7357))
+
+                    // Important: clip the view so it doesn't overlap
+                    clipToOutline = true
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
-
 @Composable
 fun PrintScreen() {
     Box(
@@ -754,7 +781,6 @@ fun PrintScreen() {
     }
 }
 
-// TAPOS NA TO!!!
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen() {
@@ -776,9 +802,9 @@ fun ProfileScreen() {
                 .addOnSuccessListener { document ->
                     userData = if (document.exists()) {
                         UserData(
-                            name = document.getString("name") ?: "Not set",
-                            email = document.getString("email") ?: currentUser.email ?: "Not set",
-                            organization = document.getString("organization") ?: "Not set"
+                            name = document.getString("name") ?: " ",
+                            email = document.getString("email") ?: currentUser.email ?: " ",
+                            organization = document.getString("organization") ?: " "
                         )
                     } else {
                         UserData(
@@ -837,7 +863,6 @@ fun ProfileScreen() {
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 
-                    // --- Updated Logout Button ---
                     val isLoggingOut = remember { mutableStateOf(false) }
                     Button(
                         onClick = {
