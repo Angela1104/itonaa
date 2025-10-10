@@ -1,18 +1,23 @@
 package com.bakhawone.thesis_bakhawone
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.with
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
@@ -20,26 +25,36 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.*
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.bakhawone.thesis_bakhawone.ui.theme.ThesisbakhawoneTheme
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
-import androidx.compose.ui.graphics.vector.ImageVector
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
-import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.Marker
-import androidx.compose.material3.OutlinedTextField
 import org.osmdroid.views.overlay.Polygon
-import android.graphics.Color
+import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
+import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import kotlin.math.*
+import android.os.Bundle
+import com.bakhawone.thesis_bakhawone.ui.theme.ThesisbakhawoneTheme
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.graphics.vector.ImageVector
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import androidx.compose.foundation.shape.RoundedCornerShape
 
-// Data class to store pinned locations with name/address
 data class PinnedLocation(
     val name: String,
     val address: String,
@@ -251,8 +266,8 @@ object GeoUtils {
 
         val polygon = Polygon()
         polygon.points = circlePoints
-        polygon.fillColor = Color.argb(50, 0, 100, 255) // Semi-transparent blue
-        polygon.strokeColor = Color.argb(180, 0, 0, 255) // Blue border
+        polygon.fillColor = 0x320064FF.toInt() // Semi-transparent blue using integer color
+        polygon.strokeColor = 0xB40000FF.toInt() // Blue border using integer color
         polygon.strokeWidth = 3.0f
         polygon.title = "500 sqm Area"
 
@@ -287,9 +302,9 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
         if (hasLocationPermission) {
             locationOverlay?.enableMyLocation()
             locationOverlay?.enableFollowLocation()
-            android.widget.Toast.makeText(context, "Location permission granted", android.widget.Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Location permission granted", Toast.LENGTH_SHORT).show()
         } else {
-            android.widget.Toast.makeText(context, "Location permission denied", android.widget.Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Location permission denied", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -485,10 +500,10 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
                                 addLocationToMap(newLocation)
 
                                 // Show success message
-                                android.widget.Toast.makeText(
+                                Toast.makeText(
                                     context,
                                     "Location '$locationName' pinned with 500 sqm area!",
-                                    android.widget.Toast.LENGTH_SHORT
+                                    Toast.LENGTH_SHORT
                                 ).show()
 
                                 // Reset dialog state
@@ -498,13 +513,13 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
                                 tempGeoPoint = null
 
                                 // --- Launch CameraActivity immediately ---
-                                val intent = android.content.Intent(context, CameraActivity::class.java)
+                                val intent = Intent(context, CameraActivity::class.java)
                                 context.startActivity(intent)
                             } else {
-                                android.widget.Toast.makeText(
+                                Toast.makeText(
                                     context,
                                     "Please enter a location name",
-                                    android.widget.Toast.LENGTH_SHORT
+                                    Toast.LENGTH_SHORT
                                 ).show()
                             }
                         },
@@ -551,10 +566,10 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
                         locationOverlay?.enableMyLocation()
                         locationOverlay?.enableFollowLocation()
 
-                        android.widget.Toast.makeText(
+                        Toast.makeText(
                             context,
                             "Waiting for location... Make sure location is enabled",
-                            android.widget.Toast.LENGTH_SHORT
+                            Toast.LENGTH_SHORT
                         ).show()
 
                         map.handler.postDelayed({
@@ -714,7 +729,8 @@ fun ReportsScreen(pinnedLocations: List<PinnedLocation>) {
             }
         } else {
             LazyColumn {
-                items(pinnedLocations) { location ->
+                items(pinnedLocations.size) { index ->
+                    val location = pinnedLocations[index]
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -793,12 +809,260 @@ fun PrintScreen() {
     }
 }
 
+// TAPOS NA TO!!!
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("Profile content")
+    val context = LocalContext.current
+    val auth = FirebaseAuth.getInstance()
+    val db = FirebaseFirestore.getInstance()
+
+    var userData by remember { mutableStateOf<UserData?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var showEditOrganizationDialog by remember { mutableStateOf(false) }
+    var tempOrganization by remember { mutableStateOf("") }
+
+    // Fetch Firestore data
+    LaunchedEffect(Unit) {
+        val currentUser = auth.currentUser
+        if (currentUser != null) {
+            db.collection("users").document(currentUser.uid)
+                .get()
+                .addOnSuccessListener { document ->
+                    userData = if (document.exists()) {
+                        UserData(
+                            name = document.getString("name") ?: "Not set",
+                            email = document.getString("email") ?: currentUser.email ?: "Not set",
+                            organization = document.getString("organization") ?: "Not set"
+                        )
+                    } else {
+                        UserData(
+                            name = currentUser.displayName ?: "Not set",
+                            email = currentUser.email ?: "Not set",
+                            organization = "Not set"
+                        )
+                    }
+                    isLoading = false
+                }
+                .addOnFailureListener {
+                    Toast.makeText(context, "Failed to load user data", Toast.LENGTH_SHORT).show()
+                    isLoading = false
+                }
+        } else {
+            Toast.makeText(context, "No user logged in", Toast.LENGTH_SHORT).show()
+            isLoading = false
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF7A876F)
+                )
+            )
+        },
+        containerColor = Color(0xFFF7F7F2)
+    ) { padding ->
+
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                ) {
+                    // Name
+                    Text(
+                        text = userData?.name ?: "Not set",
+                        fontSize = 37.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    // --- Updated Logout Button ---
+                    val isLoggingOut = remember { mutableStateOf(false) }
+                    Button(
+                        onClick = {
+                            if (isLoggingOut.value) return@Button
+                            isLoggingOut.value = true
+                            auth.signOut()
+                            Toast.makeText(context, "Logout successful", Toast.LENGTH_SHORT).show()
+                            val intent = Intent(context, MainActivity::class.java)
+                            intent.flags =
+                                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            context.startActivity(intent)
+                            isLoggingOut.value = false
+                        },
+                        shape = RoundedCornerShape(50.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF7A876F),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier
+                            .width(180.dp)
+                            .height(65.dp)
+                            .padding(vertical = 12.dp)
+                    ) {
+                        if (isLoggingOut.value) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        } else {
+                            Text(
+                                text = "LOG OUT",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(40.dp))
+
+                    // Email & Organization fields
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .align(Alignment.CenterHorizontally)
+                    ) {
+                        ProfileRoundedField(
+                            label = "Email",
+                            value = userData?.email ?: "Not set",
+                            icon = Icons.Default.Email
+                        )
+
+                        ProfileRoundedField(
+                            label = "Organization",
+                            value = userData?.organization ?: "Not set",
+                            icon = Icons.Default.Work,
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    tempOrganization = userData?.organization ?: ""
+                                    showEditOrganizationDialog = true
+                                }) {
+                                    Icon(
+                                        Icons.Filled.Edit,
+                                        contentDescription = "Edit",
+                                        tint = Color.Gray
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Dialog for editing organization
+    if (showEditOrganizationDialog) {
+        EditOrganizationDialog(
+            organization = tempOrganization,
+            onDismiss = { showEditOrganizationDialog = false },
+            onSave = { newOrg ->
+                val currentUser = auth.currentUser
+                if (currentUser != null) {
+                    db.collection("users").document(currentUser.uid)
+                        .update("organization", newOrg)
+                        .addOnSuccessListener {
+                            userData = userData?.copy(organization = newOrg)
+                            Toast.makeText(context, "Organization updated!", Toast.LENGTH_SHORT).show()
+                        }
+                }
+                showEditOrganizationDialog = false
+            }
+        )
     }
 }
+
+@Composable
+fun ProfileRoundedField(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    trailingIcon: (@Composable () -> Unit)? = null
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {},
+        label = { Text(label, fontSize = 15.sp, color = Color.Black) },
+        leadingIcon = { Icon(icon, contentDescription = label, tint = Color.Black) },
+        trailingIcon = trailingIcon,
+        shape = RoundedCornerShape(50.dp),
+        singleLine = true,
+        enabled = false,
+        textStyle = LocalTextStyle.current.copy(
+            fontSize = 18.sp,
+            color = Color.Black,
+            fontWeight = FontWeight.Medium
+        ),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Color.Black,
+            unfocusedBorderColor = Color.Black,
+            cursorColor = Color.Black,
+            focusedLabelColor = Color.Black,
+            unfocusedLabelColor = Color.Black,
+            disabledTextColor = Color.Black,
+            disabledBorderColor = Color.Black,
+            disabledLabelColor = Color.Black,
+            disabledLeadingIconColor = Color.Black
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    )
+}
+
+@Composable
+fun EditOrganizationDialog(
+    organization: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var tempOrg by remember { mutableStateOf(organization) }
+
+    AlertDialog(
+        onDismissRequest = { onDismiss() },
+        title = { Text("Edit Organization") },
+        text = {
+            OutlinedTextField(
+                value = tempOrg,
+                onValueChange = { tempOrg = it },
+                label = { Text("Organization Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            Button(onClick = { if (tempOrg.isNotBlank()) onSave(tempOrg) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onDismiss() }) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+data class UserData(
+    val name: String,
+    val email: String,
+    val organization: String
+)

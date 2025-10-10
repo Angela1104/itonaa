@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_500">#6200EE</color>
-    <color name="purple_700">#3700B3</color>
-    <color name="teal_200">#03DAC5</color>
+    <!-- Your custom colors matching your Compose theme -->
+    <color name="primary_color">#FF7D8A6F</color>
+    <color name="secondary_color">#FF607048</color>
+    <color name="background_color">#FFF9F9F9</color>
+    <color name="outline_color">#FF000000</color>
 </resources>

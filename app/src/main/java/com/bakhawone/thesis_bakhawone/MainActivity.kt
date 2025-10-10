@@ -14,6 +14,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 
 // Compose Material 3
 import androidx.compose.material3.*
@@ -27,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -70,6 +73,7 @@ class MainActivity : ComponentActivity() {
 fun LoginScreen(auth: FirebaseAuth) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = context as? ComponentActivity
 
@@ -99,6 +103,10 @@ fun LoginScreen(auth: FirebaseAuth) {
                 placeholder = { Text("Email", fontSize = 20.sp) },
                 singleLine = true,
                 shape = RoundedCornerShape(50.dp),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Email,
+                    imeAction = ImeAction.Next
+                ),
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
             )
 
@@ -109,11 +117,17 @@ fun LoginScreen(auth: FirebaseAuth) {
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 shape = RoundedCornerShape(50.dp),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done
+                ),
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
             )
 
             Button(
                 onClick = {
+                    if (isLoading) return@Button
+
                     val trimmedEmail = email.trim()
                     val trimmedPassword = password.trim()
 
@@ -122,8 +136,10 @@ fun LoginScreen(auth: FirebaseAuth) {
                         return@Button
                     }
 
+                    isLoading = true
                     auth.signInWithEmailAndPassword(trimmedEmail, trimmedPassword)
                         .addOnCompleteListener { task ->
+                            isLoading = false
                             if (task.isSuccessful) {
                                 Toast.makeText(context, "Login successful", Toast.LENGTH_SHORT).show()
                                 activity?.startActivity(Intent(activity, DashboardActivity::class.java))
@@ -137,16 +153,27 @@ fun LoginScreen(auth: FirebaseAuth) {
                             }
                         }
                 },
+                enabled = !isLoading,
                 shape = RoundedCornerShape(50.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.width(180.dp).padding(vertical = 16.dp).height(50.dp)
+                modifier = Modifier
+                    .width(180.dp)
+                    .padding(vertical = 16.dp)
+                    .height(50.dp)
             ) {
-                Text(
-                    "LOG IN",
-                    fontSize = 23.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                } else {
+                    Text(
+                        "LOG IN",
+                        fontSize = 23.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
 
             Text(
