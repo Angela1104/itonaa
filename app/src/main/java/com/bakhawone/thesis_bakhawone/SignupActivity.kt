@@ -163,22 +163,6 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                     .padding(vertical = 8.dp)
             )
 
-            // Password match indicator
-            if (password.isNotEmpty() && confirmPassword.isNotEmpty()) {
-                Text(
-                    text = if (password == confirmPassword)
-                        "✓ Passwords match"
-                    else "✗ Passwords do not match",
-                    fontSize = 14.sp,
-                    color = if (password == confirmPassword)
-                        MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-            }
-
             // Sign Up Button
             Button(
                 onClick = {
@@ -240,7 +224,7 @@ fun SignupScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                                                             Toast.LENGTH_SHORT
                                                         ).show()
 
-                                                        // ✅ Navigate to DashboardActivity
+                                                        // Navigate to DashboardActivity
                                                         val intent = Intent(context, DashboardActivity::class.java)
                                                         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                                                         context.startActivity(intent)

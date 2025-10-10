@@ -290,7 +290,7 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
     // Location permission state
     var hasLocationPermission by remember { mutableStateOf(false) }
 
-    // Permission launcher
+    // Permission launcher (used only when pressing the button)
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -308,7 +308,7 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
         }
     }
 
-    // Check permission on startup
+    // Check permission once (no popup)
     LaunchedEffect(Unit) {
         val fineLocationPermission = ContextCompat.checkSelfPermission(
             context,
@@ -323,16 +323,13 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
         hasLocationPermission = fineLocationPermission || coarseLocationPermission
     }
 
-    // Function to handle location pinning
     fun handleLocationPinning(geoPoint: GeoPoint) {
         tempGeoPoint = geoPoint
         showLocationDialog = true
     }
 
-    // Function to add marker and circle to map
     fun addLocationToMap(location: PinnedLocation) {
         mapView?.let { map ->
-            // Add marker
             val marker = Marker(map)
             marker.position = GeoPoint(location.latitude, location.longitude)
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -344,8 +341,7 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
             }
             marker.icon = context.getDrawable(android.R.drawable.ic_menu_mylocation)
 
-            // Add 500 sqm circle
-            val radius = GeoUtils.calculateRadiusForArea(500.0) // 500 sqm area
+            val radius = GeoUtils.calculateRadiusForArea(500.0)
             val circle = GeoUtils.createCirclePolygon(
                 center = GeoPoint(location.latitude, location.longitude),
                 radiusMeters = radius
@@ -358,18 +354,12 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
         }
     }
 
-    // Load existing pinned locations when map is ready
     LaunchedEffect(mapView, pinnedLocations.size) {
         mapView?.let { map ->
-            // Clear existing overlays (except location overlay)
             val overlaysToKeep = map.overlays.filter { it is MyLocationNewOverlay }
             map.overlays.clear()
             map.overlays.addAll(overlaysToKeep)
-
-            // Add all pinned locations with their circles
-            pinnedLocations.forEach { location ->
-                addLocationToMap(location)
-            }
+            pinnedLocations.forEach { location -> addLocationToMap(location) }
             map.invalidate()
         }
     }
@@ -382,29 +372,23 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
                     setBuiltInZoomControls(true)
                     setMultiTouchControls(true)
 
-                    // Restrict to Puerto Princesa
                     val puertoPrincesaBounds = BoundingBox(10.5, 118.85, 9.6, 117.8)
                     setScrollableAreaLimitDouble(puertoPrincesaBounds)
                     controller.setZoom(12.0)
                     controller.setCenter(GeoPoint(9.7439, 118.7357))
 
-                    // User location overlay
                     val newLocationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(ctx), this)
                     if (hasLocationPermission) {
                         newLocationOverlay.enableMyLocation()
                         newLocationOverlay.enableFollowLocation()
                     }
                     overlays.add(newLocationOverlay)
-
                     locationOverlay = newLocationOverlay
 
-                    // Double tap listener for pinning locations
                     val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
                         override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
                             val projection = this@apply.projection
                             val geoPoint = projection.fromPixels(e.x.toInt(), e.y.toInt()) as GeoPoint
-
-                            // Use Handler to trigger from main thread
                             android.os.Handler(ctx.mainLooper).post {
                                 handleLocationPinning(geoPoint)
                             }
@@ -417,7 +401,6 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
                         false
                     }
 
-                    // Update map center when first location is available
                     newLocationOverlay.runOnFirstFix {
                         newLocationOverlay.myLocation?.let { loc ->
                             controller.setCenter(GeoPoint(loc.latitude, loc.longitude))
@@ -431,7 +414,7 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
             modifier = Modifier.fillMaxSize()
         )
 
-        // Location Input Dialog
+        // Dialog for adding pinned location info (same as before)
         if (showLocationDialog && tempGeoPoint != null) {
             AlertDialog(
                 onDismissRequest = {
@@ -471,7 +454,6 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
                                 color = MaterialTheme.colorScheme.secondary
                             )
 
-                            // Show calculated radius info
                             val radius = GeoUtils.calculateRadiusForArea(500.0)
                             Text(
                                 "500 sqm area radius: ${String.format("%.1f", radius)} meters",
@@ -485,7 +467,6 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
                     Button(
                         onClick = {
                             if (locationName.isNotBlank() && tempGeoPoint != null) {
-                                // Create new location
                                 val newLocation = PinnedLocation(
                                     name = locationName,
                                     address = locationAddress,
@@ -493,26 +474,20 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
                                     longitude = tempGeoPoint!!.longitude
                                 )
 
-                                // Add to shared list
                                 pinnedLocations.add(newLocation)
-
-                                // Add marker and circle to map
                                 addLocationToMap(newLocation)
 
-                                // Show success message
                                 Toast.makeText(
                                     context,
                                     "Location '$locationName' pinned with 500 sqm area!",
                                     Toast.LENGTH_SHORT
                                 ).show()
 
-                                // Reset dialog state
                                 showLocationDialog = false
                                 locationName = ""
                                 locationAddress = ""
                                 tempGeoPoint = null
 
-                                // --- Launch CameraActivity immediately ---
                                 val intent = Intent(context, CameraActivity::class.java)
                                 context.startActivity(intent)
                             } else {
@@ -543,7 +518,7 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
             )
         }
 
-        // Floating action button to show current location
+        // Floating button (kept)
         FloatingActionButton(
             onClick = {
                 if (!hasLocationPermission) {
@@ -587,36 +562,6 @@ fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
             containerColor = MaterialTheme.colorScheme.primary
         ) {
             Icon(Icons.Filled.MyLocation, "Current Location")
-        }
-
-        // Permission request dialog
-        if (!hasLocationPermission) {
-            AlertDialog(
-                onDismissRequest = { /* Don't allow dismiss without action */ },
-                title = { Text("Location Permission Required") },
-                text = { Text("This app needs location access to show your current position on the map and enable location pinning features.") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            locationPermissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION
-                                )
-                            )
-                        }
-                    ) {
-                        Text("Grant Permission")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { /* User denied permission */ }
-                    ) {
-                        Text("Deny")
-                    }
-                }
-            )
         }
     }
 }

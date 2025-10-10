@@ -3,16 +3,22 @@
     package="com.bakhawone.thesis_bakhawone">
 
     <!-- Permissions -->
+    <!-- Location permissions for features that require GPS or location data -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Internet and network state permissions for Firebase, API calls, etc. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Camera access for image capture features -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" />
+
+    <!-- Storage permissions (for Android 13 and below compatibility) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-
-    <uses-feature android:name="android.hardware.camera.any" />
 
     <application
         android:allowBackup="true"
