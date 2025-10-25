@@ -85,6 +85,7 @@ class BoundaryRenderer {
     fun draw(pose: Pose, camera: Camera?) {
         GLES20.glUseProgram(program)
 
+        // Set up matrices
         pose.toMatrix(modelMatrix, 0)
         if (camera != null) {
             camera.getViewMatrix(viewMatrix, 0)
@@ -94,30 +95,33 @@ class BoundaryRenderer {
             Matrix.setIdentityM(projectionMatrix, 0)
         }
 
-        Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
-        Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, modelMatrix, 0)
+        // Calculate MVP matrix: Projection * View * Model
+        Matrix.multiplyMM(mvpMatrix, 0, viewMatrix, 0, modelMatrix, 0)
+        Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvpMatrix, 0)
 
         GLES20.glEnableVertexAttribArray(positionHandle)
         GLES20.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mvpMatrix, 0)
+
+        // Enable depth testing for proper 3D rendering
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDepthFunc(GLES20.GL_LEQUAL)
+
+        // Draw boundary circle outline
         GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 0, circleBuffer)
-
-        // ✅ Transparent fill — skip drawing inner area for true transparency
-        // (We do NOT draw the TRIANGLE_FAN part anymore)
-
-        // ✅ Draw only the boundary outline (green edge)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        GLES20.glUniform4f(colorHandle, 0f, 1f, 0f, 1f) // bright green, fully opaque
-        GLES20.glLineWidth(4f)
+        GLES20.glUniform4f(colorHandle, 0f, 1f, 0f, 0.8f) // green with transparency
+        GLES20.glLineWidth(6f)
         GLES20.glDrawArrays(GLES20.GL_LINE_LOOP, 1, (circleCoords.size / 3) - 1)
         GLES20.glDisable(GLES20.GL_BLEND)
 
-        // ✅ Draw white center marker
+        // Draw center marker
         GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 0, centerBuffer)
-        GLES20.glUniform4f(colorHandle, 1f, 1f, 1f, 1f)
+        GLES20.glUniform4f(colorHandle, 1f, 1f, 1f, 1f) // white center
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_FAN, 0, centerCoords.size / 3)
 
         GLES20.glDisableVertexAttribArray(positionHandle)
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
     }
 
     private fun generateCircleVertices(radius: Float, segments: Int): FloatArray {

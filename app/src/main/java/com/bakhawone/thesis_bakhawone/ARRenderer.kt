@@ -74,7 +74,7 @@ class ARRenderer(
                     plane.type == Plane.Type.HORIZONTAL_UPWARD_FACING) {
                     detectedPlane = plane
                     planeFound = true
-                    Log.d("ARRenderer", "Plane detected!")
+                    Log.d("ARRenderer", "Plane detected! Center: ${plane.centerPose}")
                     break
                 }
             }
@@ -85,8 +85,16 @@ class ARRenderer(
             createStableAnchor()
         }
 
-        // ✅ Draw only if the anchor exists (fixed in space)
-        anchor?.let { boundaryRenderer.draw(it.pose, camera) }
+        // ✅ Check if anchor is still valid, recreate if needed
+        if (anchor != null && anchor!!.trackingState != TrackingState.TRACKING) {
+            Log.d("ARRenderer", "Anchor lost tracking, recreating...")
+            anchor = null
+        }
+
+        // ✅ Draw only if the anchor exists and is tracking
+        if (anchor != null && anchor!!.trackingState == TrackingState.TRACKING) {
+            boundaryRenderer.draw(anchor!!.pose, camera)
+        }
     }
 
     private fun createStableAnchor() {
@@ -103,6 +111,8 @@ class ARRenderer(
         )
 
         anchor = session.createAnchor(adjustedPose)
-        Log.d("ARRenderer", "Stable anchor created on detected surface")
+        Log.d("ARRenderer", "Stable anchor created at lat: $centerLat, lon: $centerLon")
+        Log.d("ARRenderer", "Device start: lat: $deviceStartLat, lon: $deviceStartLon")
+        Log.d("ARRenderer", "Offsets: lat: $latOffset, lon: $lonOffset")
     }
 }
