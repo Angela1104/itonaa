@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "262087534417",
-    "project_id": "thesisbakhawone",
-    "storage_bucket": "thesisbakhawone.firebasestorage.app"
+    "project_number": "30646552667",
+    "project_id": "thesisbakhawone-64035",
+    "storage_bucket": "thesisbakhawone-64035.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:262087534417:android:f64df4bbf248ac55c61570",
+        "mobilesdk_app_id": "1:30646552667:android:a3bd9594f99431a251577e",
         "android_client_info": {
           "package_name": "com.bakhawone.thesis_bakhawone"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBfI2UFz2zVxhrh3GZDMyaLpfaSQowQBPQ"
+          "current_key": "AIzaSyD_f0nIDqgnda1cjlXQXQHsj0e0ka-1_KY"
         }
       ],
       "services": {

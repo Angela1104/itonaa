@@ -41,6 +41,9 @@ android {
 }
 
 dependencies {
+    // ARCore
+    implementation("com.google.ar:core:1.45.0")
+
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
     implementation("com.google.firebase:firebase-auth-ktx")

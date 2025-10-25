@@ -31,8 +31,8 @@ import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 @Composable
 fun HomeScreen() {
     val context = LocalContext.current
-    val auth = FirebaseAuth.getInstance()
-    val db = FirebaseFirestore.getInstance()
+    val auth = remember { FirebaseAuth.getInstance() }
+    val db = remember { FirebaseFirestore.getInstance() }
 
     var mapView by remember { mutableStateOf<MapView?>(null) }
     var locationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
@@ -40,7 +40,20 @@ fun HomeScreen() {
     var showConfirmDialog by remember { mutableStateOf(false) }
     var currentGeoPoint by remember { mutableStateOf<GeoPoint?>(null) }
 
-    // Permission launcher
+    // ✅ Anonymous sign-in (ensures every device has a unique UID)
+    LaunchedEffect(Unit) {
+        if (auth.currentUser == null) {
+            auth.signInAnonymously()
+                .addOnSuccessListener {
+                    Toast.makeText(context, "Anonymous session started", Toast.LENGTH_SHORT).show()
+                }
+                .addOnFailureListener {
+                    Toast.makeText(context, "Anonymous sign-in failed: ${it.message}", Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
+    // 🔹 Permission launcher
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -56,7 +69,7 @@ fun HomeScreen() {
         }
     }
 
-    // Check permission on load
+    // 🔹 Check permission on launch
     LaunchedEffect(Unit) {
         val fineGranted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION
@@ -68,7 +81,8 @@ fun HomeScreen() {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Map view
+
+        // 🗺️ MapView setup
         AndroidView(
             factory = { ctx ->
                 MapView(ctx).apply {
@@ -77,7 +91,6 @@ fun HomeScreen() {
                     setBuiltInZoomControls(true)
                     setMultiTouchControls(true)
 
-                    // Limit scroll area (Puerto Princesa)
                     val bounds = BoundingBox(10.5, 118.85, 9.6, 117.8)
                     setScrollableAreaLimitDouble(bounds)
                     controller.setZoom(12.0)
@@ -90,14 +103,13 @@ fun HomeScreen() {
                     }
                     overlays.add(overlay)
                     locationOverlay = overlay
-
                     mapView = this
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
 
-        // Confirmation dialog
+        // 🗨️ Confirmation dialog for saving location
         if (showConfirmDialog && currentGeoPoint != null) {
             AlertDialog(
                 onDismissRequest = { showConfirmDialog = false },
@@ -107,8 +119,8 @@ fun HomeScreen() {
                         Text("Do you want to save your current location as the centerpoint?")
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Lat: ${String.format("%.6f", currentGeoPoint!!.latitude)}\n" +
-                                    "Lon: ${String.format("%.6f", currentGeoPoint!!.longitude)}\n" +
+                            "Latitude: ${String.format("%.6f", currentGeoPoint!!.latitude)}\n" +
+                                    "Longitude: ${String.format("%.6f", currentGeoPoint!!.longitude)}\n" +
                                     "Area: 500 sqm",
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -118,46 +130,39 @@ fun HomeScreen() {
                     Button(
                         onClick = {
                             val loc = currentGeoPoint!!
-                            val userId = auth.currentUser?.uid
+                            val userId = auth.currentUser?.uid ?: return@Button
 
-                            if (userId != null) {
-                                val locationData = hashMapOf(
-                                    "name" to "Centerpoint",
-                                    "address" to "Saved from current location",
-                                    "latitude" to loc.latitude,
-                                    "longitude" to loc.longitude,
-                                    "timestamp" to System.currentTimeMillis()
-                                )
+                            val locationData = hashMapOf(
+                                "name" to "Centerpoint",
+                                "address" to "Saved from current location",
+                                "latitude" to loc.latitude,
+                                "longitude" to loc.longitude,
+                                "areaSqm" to 500,
+                                "timestamp" to System.currentTimeMillis()
+                            )
 
-                                db.collection("users")
-                                    .document(userId)
-                                    .collection("centerpoints")
-                                    .add(locationData)
-                                    .addOnSuccessListener {
-                                        Toast.makeText(
-                                            context,
-                                            "Centerpoint saved to Firebase!",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                            db.collection("users")
+                                .document(userId)
+                                .collection("centerpoints")
+                                .add(locationData)
+                                .addOnSuccessListener {
+                                    Toast.makeText(
+                                        context,
+                                        "Centerpoint saved successfully!",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
 
-                                        // Open ARActivity after successful save
-                                        val intent = Intent(context, ARActivity::class.java)
-                                        context.startActivity(intent)
-                                    }
-                                    .addOnFailureListener {
-                                        Toast.makeText(
-                                            context,
-                                            "Failed to save centerpoint to Firebase.",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    "No authenticated user found!",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
+                                    // 🚀 Open ARActivity after successful save
+                                    val intent = Intent(context, ARActivity::class.java)
+                                    context.startActivity(intent)
+                                }
+                                .addOnFailureListener {
+                                    Toast.makeText(
+                                        context,
+                                        "Failed to save to Firebase: ${it.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
 
                             showConfirmDialog = false
                         }
@@ -173,7 +178,7 @@ fun HomeScreen() {
             )
         }
 
-        // Floating button for current location
+        // 📍 FloatingActionButton — Centers map on current location
         FloatingActionButton(
             onClick = {
                 if (!hasLocationPermission) {
