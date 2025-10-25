@@ -31,7 +31,7 @@
         android:theme="@style/Theme.Thesisbakhawone.NoActionBar">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".DashboardActivity"
             android:exported="true"
             android:theme="@style/Theme.Thesisbakhawone.NoActionBar">
             <intent-filter>
@@ -39,16 +39,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".SignupActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Thesisbakhawone.NoActionBar" />
-
-        <activity
-            android:name=".DashboardActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Thesisbakhawone.NoActionBar" />
 
         <activity
             android:name=".CameraActivity"

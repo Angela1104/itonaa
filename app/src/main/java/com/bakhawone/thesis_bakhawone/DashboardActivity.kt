@@ -1,63 +1,37 @@
 package com.bakhawone.thesis_bakhawone
 
-import android.Manifest
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.widget.Toast
+import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.foundation.background
-import android.content.Context
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.with
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.*
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.launch
-import org.osmdroid.config.Configuration
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
-import org.osmdroid.views.overlay.Polygon
-import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
-import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
-import kotlin.math.*
-import android.os.Bundle
+import com.bakhawone.thesis_bakhawone.ui.theme.HomeScreen
 import com.bakhawone.thesis_bakhawone.ui.theme.ThesisbakhawoneTheme
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.graphics.vector.ImageVector
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.bakhawone.thesis_bakhawone.ui.theme.PrintScreen
+import com.bakhawone.thesis_bakhawone.ui.theme.ProfileScreen
+import com.bakhawone.thesis_bakhawone.ui.theme.RecordScreen
+import org.osmdroid.config.Configuration
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.overlay.Polygon
+import kotlin.math.*
 
+// Data model shared at top-level (kept here so Dashboard and other screens can reference)
 data class PinnedLocation(
     val name: String,
     val address: String,
@@ -66,11 +40,67 @@ data class PinnedLocation(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+// Utility functions kept here (same as your original)
+object GeoUtils {
+    private const val EARTH_RADIUS_METERS = 6371000.0
+
+    /**
+     * Calculate the radius needed for a circle to have the specified area
+     * Area = π * r², so r = √(Area / π)
+     */
+    fun calculateRadiusForArea(areaSqm: Double): Double {
+        return sqrt(areaSqm / Math.PI)
+    }
+
+    /**
+     * Calculate destination point given start point, distance and bearing
+     */
+    fun calculateDestinationPoint(start: GeoPoint, distance: Double, bearing: Double): GeoPoint {
+        val lat1 = Math.toRadians(start.latitude)
+        val lon1 = Math.toRadians(start.longitude)
+        val angularDistance = distance / EARTH_RADIUS_METERS
+        val bearingRad = Math.toRadians(bearing)
+
+        val lat2 = asin(sin(lat1) * cos(angularDistance) +
+                cos(lat1) * sin(angularDistance) * cos(bearingRad))
+
+        val lon2 = lon1 + atan2(sin(bearingRad) * sin(angularDistance) * cos(lat1),
+            cos(angularDistance) - sin(lat1) * sin(lat2))
+
+        return GeoPoint(Math.toDegrees(lat2), Math.toDegrees(lon2))
+    }
+
+    /**
+     * Create a circle polygon with specified center, radius and number of points
+     */
+    fun createCirclePolygon(center: GeoPoint, radiusMeters: Double, points: Int = 36): Polygon {
+        val circlePoints = ArrayList<GeoPoint>()
+
+        for (i in 0 until points) {
+            val bearing = (360.0 * i) / points
+            val point = calculateDestinationPoint(center, radiusMeters, bearing)
+            circlePoints.add(point)
+        }
+
+        // Close the circle
+        circlePoints.add(circlePoints[0])
+
+        val polygon = Polygon()
+        polygon.points = circlePoints
+        polygon.fillColor = 0x320064FF.toInt() // Semi-transparent blue using integer color
+        polygon.strokeColor = 0xB40000FF.toInt() // Blue border using integer color
+        polygon.strokeWidth = 3.0f
+        polygon.title = "500 sqm Area"
+
+        return polygon
+    }
+}
+
 class DashboardActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // OSMDroid config
+        // OSMDroid config (same as original)
         Configuration.getInstance().load(applicationContext, getPreferences(MODE_PRIVATE))
 
         setContent {
@@ -92,7 +122,7 @@ fun DashboardApp() {
 
     val items = listOf(
         BottomNavItem("Home", Icons.Filled.Home),
-        BottomNavItem("Record", Icons.AutoMirrored.Filled.List),
+        BottomNavItem("Record", Icons.Filled.List),
         BottomNavItem("Print", Icons.Filled.Print),
         BottomNavItem("Profile", Icons.Filled.Person)
     )
@@ -156,7 +186,7 @@ fun DashboardApp() {
                 label = "ScreenTransition"
             ) { screenIndex ->
                 when (screenIndex) {
-                    0 -> HomeScreen(pinnedLocations = pinnedLocations)
+                    0 -> HomeScreen()
                     1 -> RecordScreen(selectedRecordTab, pinnedLocations) { selectedRecordTab = it }
                     2 -> PrintScreen()
                     3 -> ProfileScreen()
@@ -220,819 +250,4 @@ fun MiniRecordsPanel(
 data class BottomNavItem(
     val title: String,
     val icon: ImageVector
-)
-
-// Utility functions for geographic calculations
-object GeoUtils {
-    private const val EARTH_RADIUS_METERS = 6371000.0
-
-    /**
-     * Calculate the radius needed for a circle to have the specified area
-     * Area = π * r², so r = √(Area / π)
-     */
-    fun calculateRadiusForArea(areaSqm: Double): Double {
-        return sqrt(areaSqm / Math.PI)
-    }
-
-    /**
-     * Calculate destination point given start point, distance and bearing
-     */
-    fun calculateDestinationPoint(start: GeoPoint, distance: Double, bearing: Double): GeoPoint {
-        val lat1 = Math.toRadians(start.latitude)
-        val lon1 = Math.toRadians(start.longitude)
-        val angularDistance = distance / EARTH_RADIUS_METERS
-        val bearingRad = Math.toRadians(bearing)
-
-        val lat2 = asin(sin(lat1) * cos(angularDistance) +
-                cos(lat1) * sin(angularDistance) * cos(bearingRad))
-
-        val lon2 = lon1 + atan2(sin(bearingRad) * sin(angularDistance) * cos(lat1),
-            cos(angularDistance) - sin(lat1) * sin(lat2))
-
-        return GeoPoint(Math.toDegrees(lat2), Math.toDegrees(lon2))
-    }
-
-    /**
-     * Create a circle polygon with specified center, radius and number of points
-     */
-    fun createCirclePolygon(center: GeoPoint, radiusMeters: Double, points: Int = 36): Polygon {
-        val circlePoints = ArrayList<GeoPoint>()
-
-        for (i in 0 until points) {
-            val bearing = (360.0 * i) / points
-            val point = calculateDestinationPoint(center, radiusMeters, bearing)
-            circlePoints.add(point)
-        }
-
-        // Close the circle
-        circlePoints.add(circlePoints[0])
-
-        val polygon = Polygon()
-        polygon.points = circlePoints
-        polygon.fillColor = 0x320064FF.toInt() // Semi-transparent blue using integer color
-        polygon.strokeColor = 0xB40000FF.toInt() // Blue border using integer color
-        polygon.strokeWidth = 3.0f
-        polygon.title = "500 sqm Area"
-
-        return polygon
-    }
-}
-
-@Composable
-fun HomeScreen(pinnedLocations: MutableList<PinnedLocation>) {
-    val context = LocalContext.current
-    var mapView by remember { mutableStateOf<MapView?>(null) }
-    var locationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
-
-    // State for location input dialog
-    var showLocationDialog by remember { mutableStateOf(false) }
-    var tempGeoPoint by remember { mutableStateOf<GeoPoint?>(null) }
-    var locationName by remember { mutableStateOf("") }
-    var locationAddress by remember { mutableStateOf("") }
-
-    // Location permission state
-    var hasLocationPermission by remember { mutableStateOf(false) }
-
-    // Permission launcher (used only when pressing the button)
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-        val coarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
-
-        hasLocationPermission = fineLocationGranted || coarseLocationGranted
-
-        if (hasLocationPermission) {
-            locationOverlay?.enableMyLocation()
-            locationOverlay?.enableFollowLocation()
-            Toast.makeText(context, "Location permission granted", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "Location permission denied", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    // Check permission once (no popup)
-    LaunchedEffect(Unit) {
-        val fineLocationPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        val coarseLocationPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        hasLocationPermission = fineLocationPermission || coarseLocationPermission
-    }
-
-    fun handleLocationPinning(geoPoint: GeoPoint) {
-        tempGeoPoint = geoPoint
-        showLocationDialog = true
-    }
-
-    fun addLocationToMap(location: PinnedLocation) {
-        mapView?.let { map ->
-            val marker = Marker(map)
-            marker.position = GeoPoint(location.latitude, location.longitude)
-            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-            marker.title = location.name
-            marker.snippet = if (location.address.isNotBlank()) {
-                "Address: ${location.address}\nLat: ${String.format("%.6f", location.latitude)}\nLon: ${String.format("%.6f", location.longitude)}"
-            } else {
-                "Lat: ${String.format("%.6f", location.latitude)}\nLon: ${String.format("%.6f", location.longitude)}"
-            }
-            marker.icon = context.getDrawable(android.R.drawable.ic_menu_mylocation)
-
-            val radius = GeoUtils.calculateRadiusForArea(500.0)
-            val circle = GeoUtils.createCirclePolygon(
-                center = GeoPoint(location.latitude, location.longitude),
-                radiusMeters = radius
-            )
-            circle.title = "${location.name} - 500 sqm Area"
-
-            map.overlays.add(marker)
-            map.overlays.add(circle)
-            map.invalidate()
-        }
-    }
-
-    LaunchedEffect(mapView, pinnedLocations.size) {
-        mapView?.let { map ->
-            val overlaysToKeep = map.overlays.filter { it is MyLocationNewOverlay }
-            map.overlays.clear()
-            map.overlays.addAll(overlaysToKeep)
-            pinnedLocations.forEach { location -> addLocationToMap(location) }
-            map.invalidate()
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        AndroidView(
-            factory = { ctx ->
-                MapView(ctx).apply {
-                    setTileSource(TileSourceFactory.MAPNIK)
-                    setBuiltInZoomControls(true)
-                    setMultiTouchControls(true)
-
-                    val puertoPrincesaBounds = BoundingBox(10.5, 118.85, 9.6, 117.8)
-                    setScrollableAreaLimitDouble(puertoPrincesaBounds)
-                    controller.setZoom(12.0)
-                    controller.setCenter(GeoPoint(9.7439, 118.7357))
-
-                    val newLocationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(ctx), this)
-                    if (hasLocationPermission) {
-                        newLocationOverlay.enableMyLocation()
-                        newLocationOverlay.enableFollowLocation()
-                    }
-                    overlays.add(newLocationOverlay)
-                    locationOverlay = newLocationOverlay
-
-                    val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
-                        override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
-                            val projection = this@apply.projection
-                            val geoPoint = projection.fromPixels(e.x.toInt(), e.y.toInt()) as GeoPoint
-                            android.os.Handler(ctx.mainLooper).post {
-                                handleLocationPinning(geoPoint)
-                            }
-                            return true
-                        }
-                    })
-
-                    setOnTouchListener { _, event ->
-                        gestureDetector.onTouchEvent(event)
-                        false
-                    }
-
-                    newLocationOverlay.runOnFirstFix {
-                        newLocationOverlay.myLocation?.let { loc ->
-                            controller.setCenter(GeoPoint(loc.latitude, loc.longitude))
-                            postInvalidate()
-                        }
-                    }
-
-                    mapView = this
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Dialog for adding pinned location info (same as before)
-        if (showLocationDialog && tempGeoPoint != null) {
-            AlertDialog(
-                onDismissRequest = {
-                    showLocationDialog = false
-                    locationName = ""
-                    locationAddress = ""
-                    tempGeoPoint = null
-                },
-                title = { Text("Add Location Details") },
-                text = {
-                    Column {
-                        OutlinedTextField(
-                            value = locationName,
-                            onValueChange = { locationName = it },
-                            label = { Text("Location Name *") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 12.dp),
-                            singleLine = true,
-                            isError = locationName.isBlank()
-                        )
-
-                        OutlinedTextField(
-                            value = locationAddress,
-                            onValueChange = { locationAddress = it },
-                            label = { Text("Address") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 16.dp),
-                            singleLine = true
-                        )
-
-                        tempGeoPoint?.let { geoPoint ->
-                            Text(
-                                "Coordinates: ${String.format("%.6f", geoPoint.latitude)}, ${String.format("%.6f", geoPoint.longitude)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-
-                            val radius = GeoUtils.calculateRadiusForArea(500.0)
-                            Text(
-                                "500 sqm area radius: ${String.format("%.1f", radius)} meters",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (locationName.isNotBlank() && tempGeoPoint != null) {
-                                val newLocation = PinnedLocation(
-                                    name = locationName,
-                                    address = locationAddress,
-                                    latitude = tempGeoPoint!!.latitude,
-                                    longitude = tempGeoPoint!!.longitude
-                                )
-
-                                pinnedLocations.add(newLocation)
-                                addLocationToMap(newLocation)
-
-                                Toast.makeText(
-                                    context,
-                                    "Location '$locationName' pinned with 500 sqm area!",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-
-                                showLocationDialog = false
-                                locationName = ""
-                                locationAddress = ""
-                                tempGeoPoint = null
-
-                                val intent = Intent(context, CameraActivity::class.java)
-                                context.startActivity(intent)
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    "Please enter a location name",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        },
-                        enabled = locationName.isNotBlank()
-                    ) {
-                        Text("Save Location")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            showLocationDialog = false
-                            locationName = ""
-                            locationAddress = ""
-                            tempGeoPoint = null
-                        }
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
-        // Floating button (kept)
-        FloatingActionButton(
-            onClick = {
-                if (!hasLocationPermission) {
-                    locationPermissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                        )
-                    )
-                    return@FloatingActionButton
-                }
-
-                mapView?.let { map ->
-                    val currentLocation = locationOverlay?.myLocation
-
-                    if (currentLocation != null) {
-                        map.controller.setCenter(GeoPoint(currentLocation.latitude, currentLocation.longitude))
-                        map.controller.setZoom(16.0)
-                    } else {
-                        locationOverlay?.enableMyLocation()
-                        locationOverlay?.enableFollowLocation()
-
-                        Toast.makeText(
-                            context,
-                            "Waiting for location... Make sure location is enabled",
-                            Toast.LENGTH_SHORT
-                        ).show()
-
-                        map.handler.postDelayed({
-                            locationOverlay?.myLocation?.let { loc ->
-                                map.controller.setCenter(GeoPoint(loc.latitude, loc.longitude))
-                                map.controller.setZoom(16.0)
-                            }
-                        }, 1000)
-                    }
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-            containerColor = MaterialTheme.colorScheme.primary
-        ) {
-            Icon(Icons.Filled.MyLocation, "Current Location")
-        }
-    }
-}
-
-@Composable
-fun RecordScreen(
-    selectedTab: Int,
-    pinnedLocations: List<PinnedLocation>,
-    onTabSelected: (Int) -> Unit
-) {
-    val subTabs = listOf(
-        "Diagrams" to Icons.Default.BarChart,
-        "Reports" to Icons.Default.Description,
-        "GIS Map" to Icons.Default.Map
-    )
-
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            subTabs.forEachIndexed { index, pair ->
-                val (label, icon) = pair
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable { onTabSelected(index) }
-                        .padding(8.dp)
-                ) {
-                    Icon(
-                        icon,
-                        contentDescription = label,
-                        tint = if (selectedTab == index) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (selectedTab == index) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.secondary
-                    )
-                }
-            }
-        }
-
-        Divider(
-            thickness = 1.dp,
-            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f),
-            modifier = Modifier.padding(vertical = 0.dp)
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .weight(1f)
-        ) {
-            when (selectedTab) {
-                0 -> DiagramsScreen()
-                1 -> ReportsScreen(pinnedLocations = pinnedLocations)
-                2 -> GISScreen()
-            }
-        }
-    }
-}
-
-@Composable
-fun DiagramsScreen() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("Diagrams content")
-    }
-}
-
-@Composable
-fun ReportsScreen(pinnedLocations: List<PinnedLocation>) {
-    val context = LocalContext.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text(
-            "Pinned Locations Report",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        // Debug: Show current count
-        Text(
-            "Total locations: ${pinnedLocations.size}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        if (pinnedLocations.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No locations pinned yet. Go to Home screen and double-tap on the map to pin locations.")
-            }
-        } else {
-            LazyColumn {
-                items(pinnedLocations.size) { index ->
-                    val location = pinnedLocations[index]
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        elevation = CardDefaults.cardElevation(2.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp)
-                        ) {
-                            Text(
-                                location.name,
-                                style = MaterialTheme.typography.headlineSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-
-                            if (location.address.isNotBlank()) {
-                                Text(
-                                    "Address: ${location.address}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.padding(bottom = 4.dp)
-                                )
-                            }
-
-                            Text(
-                                "Latitude: ${String.format("%.6f", location.latitude)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(bottom = 2.dp)
-                            )
-
-                            Text(
-                                "Longitude: ${String.format("%.6f", location.longitude)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-
-                            // Show area information
-                            val radius = GeoUtils.calculateRadiusForArea(500.0)
-                            Text(
-                                "Area: 500 sqm (Radius: ${String.format("%.1f", radius)}m)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-
-                            Text(
-                                "Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date(location.timestamp))}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-@Composable
-fun GISScreen(context: Context = LocalContext.current) {
-    // Height of your subtab row + padding + divider (adjust if needed)
-    val topBoundary = 0.dp
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = topBoundary)
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        AndroidView(
-            factory = { ctx ->
-                MapView(ctx).apply {
-                    // Standard OSM setup
-                    setTileSource(TileSourceFactory.MAPNIK)
-                    setBuiltInZoomControls(true)
-                    setMultiTouchControls(true)
-
-                    // Optional: restrict area (Puerto Princesa)
-                    val puertoPrincesaBounds = BoundingBox(10.5, 118.85, 9.6, 117.8)
-                    setScrollableAreaLimitDouble(puertoPrincesaBounds)
-
-                    // Default center + zoom
-                    controller.setZoom(12.0)
-                    controller.setCenter(GeoPoint(9.7439, 118.7357))
-
-                    // Important: clip the view so it doesn't overlap
-                    clipToOutline = true
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-    }
-}
-@Composable
-fun PrintScreen() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("Print content")
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ProfileScreen() {
-    val context = LocalContext.current
-    val auth = FirebaseAuth.getInstance()
-    val db = FirebaseFirestore.getInstance()
-
-    var userData by remember { mutableStateOf<UserData?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var showEditOrganizationDialog by remember { mutableStateOf(false) }
-    var tempOrganization by remember { mutableStateOf("") }
-
-    // Fetch Firestore data
-    LaunchedEffect(Unit) {
-        val currentUser = auth.currentUser
-        if (currentUser != null) {
-            db.collection("users").document(currentUser.uid)
-                .get()
-                .addOnSuccessListener { document ->
-                    userData = if (document.exists()) {
-                        UserData(
-                            name = document.getString("name") ?: " ",
-                            email = document.getString("email") ?: currentUser.email ?: " ",
-                            organization = document.getString("organization") ?: " "
-                        )
-                    } else {
-                        UserData(
-                            name = currentUser.displayName ?: "Not set",
-                            email = currentUser.email ?: "Not set",
-                            organization = "Not set"
-                        )
-                    }
-                    isLoading = false
-                }
-                .addOnFailureListener {
-                    Toast.makeText(context, "Failed to load user data", Toast.LENGTH_SHORT).show()
-                    isLoading = false
-                }
-        } else {
-            Toast.makeText(context, "No user logged in", Toast.LENGTH_SHORT).show()
-            isLoading = false
-        }
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF7A876F)
-                )
-            )
-        },
-        containerColor = Color(0xFFF7F7F2)
-    ) { padding ->
-
-        if (isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                ) {
-                    // Name
-                    Text(
-                        text = userData?.name ?: "Not set",
-                        fontSize = 37.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-
-                    val isLoggingOut = remember { mutableStateOf(false) }
-                    Button(
-                        onClick = {
-                            if (isLoggingOut.value) return@Button
-                            isLoggingOut.value = true
-                            auth.signOut()
-                            Toast.makeText(context, "Logout successful", Toast.LENGTH_SHORT).show()
-                            val intent = Intent(context, MainActivity::class.java)
-                            intent.flags =
-                                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                            context.startActivity(intent)
-                            isLoggingOut.value = false
-                        },
-                        shape = RoundedCornerShape(50.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF7A876F),
-                            contentColor = Color.White
-                        ),
-                        modifier = Modifier
-                            .width(180.dp)
-                            .height(65.dp)
-                            .padding(vertical = 12.dp)
-                    ) {
-                        if (isLoggingOut.value) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        } else {
-                            Text(
-                                text = "LOG OUT",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(40.dp))
-
-                    // Email & Organization fields
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .align(Alignment.CenterHorizontally)
-                    ) {
-                        ProfileRoundedField(
-                            label = "Email",
-                            value = userData?.email ?: "Not set",
-                            icon = Icons.Default.Email
-                        )
-
-                        ProfileRoundedField(
-                            label = "Organization",
-                            value = userData?.organization ?: "Not set",
-                            icon = Icons.Default.Work,
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    tempOrganization = userData?.organization ?: ""
-                                    showEditOrganizationDialog = true
-                                }) {
-                                    Icon(
-                                        Icons.Filled.Edit,
-                                        contentDescription = "Edit",
-                                        tint = Color.Gray
-                                    )
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    // Dialog for editing organization
-    if (showEditOrganizationDialog) {
-        EditOrganizationDialog(
-            organization = tempOrganization,
-            onDismiss = { showEditOrganizationDialog = false },
-            onSave = { newOrg ->
-                val currentUser = auth.currentUser
-                if (currentUser != null) {
-                    db.collection("users").document(currentUser.uid)
-                        .update("organization", newOrg)
-                        .addOnSuccessListener {
-                            userData = userData?.copy(organization = newOrg)
-                            Toast.makeText(context, "Organization updated!", Toast.LENGTH_SHORT).show()
-                        }
-                }
-                showEditOrganizationDialog = false
-            }
-        )
-    }
-}
-
-@Composable
-fun ProfileRoundedField(
-    label: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    trailingIcon: (@Composable () -> Unit)? = null
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = {},
-        label = { Text(label, fontSize = 15.sp, color = Color.Black) },
-        leadingIcon = { Icon(icon, contentDescription = label, tint = Color.Black) },
-        trailingIcon = trailingIcon,
-        shape = RoundedCornerShape(50.dp),
-        singleLine = true,
-        enabled = false,
-        textStyle = LocalTextStyle.current.copy(
-            fontSize = 18.sp,
-            color = Color.Black,
-            fontWeight = FontWeight.Medium
-        ),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color.Black,
-            unfocusedBorderColor = Color.Black,
-            cursorColor = Color.Black,
-            focusedLabelColor = Color.Black,
-            unfocusedLabelColor = Color.Black,
-            disabledTextColor = Color.Black,
-            disabledBorderColor = Color.Black,
-            disabledLabelColor = Color.Black,
-            disabledLeadingIconColor = Color.Black
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-    )
-}
-
-@Composable
-fun EditOrganizationDialog(
-    organization: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit
-) {
-    var tempOrg by remember { mutableStateOf(organization) }
-
-    AlertDialog(
-        onDismissRequest = { onDismiss() },
-        title = { Text("Edit Organization") },
-        text = {
-            OutlinedTextField(
-                value = tempOrg,
-                onValueChange = { tempOrg = it },
-                label = { Text("Organization Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-        },
-        confirmButton = {
-            Button(onClick = { if (tempOrg.isNotBlank()) onSave(tempOrg) }) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = { onDismiss() }) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-data class UserData(
-    val name: String,
-    val email: String,
-    val organization: String
 )
