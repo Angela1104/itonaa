@@ -15,19 +15,20 @@ class ARRenderer(
     private val session: Session,
     private val deviceStartLat: Double,
     private val deviceStartLon: Double,
-    private val context: Context   // ✅ Added context so we can access display rotation
+    private val context: Context
 ) : GLSurfaceView.Renderer {
 
     private var centerLat: Double? = null
     private var centerLon: Double? = null
     private var anchor: Anchor? = null
+    private var planeFound = false
 
     private lateinit var surfaceView: GLSurfaceView
     private val cameraBackgroundRenderer = CameraBackgroundRenderer()
     private val boundaryRenderer = BoundaryRenderer()
-    private var deviceStartPose: Pose? = null
+    private var detectedPlane: Plane? = null
 
-    // ✅ Add display reference
+    // Get display rotation for proper AR orientation
     private val display: Display by lazy {
         (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay
     }
@@ -53,7 +54,6 @@ class ARRenderer(
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES20.glViewport(0, 0, width, height)
-        // ✅ Inform ARCore of current rotation and viewport
         session.setDisplayGeometry(display.rotation, width, height)
     }
 
@@ -63,26 +63,46 @@ class ARRenderer(
         val frame = session.update()
         val camera = frame.camera
 
-        // Draw the camera background correctly oriented
         cameraBackgroundRenderer.draw(frame)
 
         if (camera.trackingState != TrackingState.TRACKING) return
-        if (deviceStartPose == null) deviceStartPose = camera.displayOrientedPose
 
-        if (centerLat != null && centerLon != null && anchor == null && deviceStartPose != null)
+        // ✅ Detect first horizontal plane
+        if (!planeFound) {
+            for (plane in session.getAllTrackables(Plane::class.java)) {
+                if (plane.trackingState == TrackingState.TRACKING &&
+                    plane.type == Plane.Type.HORIZONTAL_UPWARD_FACING) {
+                    detectedPlane = plane
+                    planeFound = true
+                    Log.d("ARRenderer", "Plane detected!")
+                    break
+                }
+            }
+        }
+
+        // ✅ Create anchor once the plane and centerpoint are both known
+        if (planeFound && anchor == null && centerLat != null && centerLon != null) {
             createStableAnchor()
+        }
 
-        anchor?.let { boundaryRenderer.draw(it.pose) }
+        // ✅ Draw only if the anchor exists (fixed in space)
+        anchor?.let { boundaryRenderer.draw(it.pose, camera) }
     }
 
     private fun createStableAnchor() {
-        val devicePose = deviceStartPose ?: return
+        val plane = detectedPlane ?: return
+        val centerPose = plane.centerPose
+
+        // Convert GPS difference to local flat coordinates (meters)
         val latOffset = ((centerLat!! - deviceStartLat) * 111000).toFloat()
         val lonOffset = ((centerLon!! - deviceStartLon) * 111000 * cos(deviceStartLat * Math.PI / 180)).toFloat()
-        val forwardDistance = 1.5f
-        val heightOffset = 0.15f
-        val anchorPose = Pose.makeTranslation(lonOffset, heightOffset, -latOffset - forwardDistance)
-        anchor = session.createAnchor(devicePose.compose(anchorPose))
-        Log.d("ARRenderer", "Stable anchor created")
+
+        // ✅ Place the anchor directly on the plane surface (Y from plane)
+        val adjustedPose = centerPose.compose(
+            Pose.makeTranslation(lonOffset, 0f, -latOffset)
+        )
+
+        anchor = session.createAnchor(adjustedPose)
+        Log.d("ARRenderer", "Stable anchor created on detected surface")
     }
 }
