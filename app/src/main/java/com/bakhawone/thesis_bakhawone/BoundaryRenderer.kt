@@ -26,8 +26,8 @@ class BoundaryRenderer {
     private val viewMatrix = FloatArray(16)
     private val projectionMatrix = FloatArray(16)
 
-    // ✅ Boundary size — 5 sqm area radius
-    private val radius = kotlin.math.sqrt(5.0 / PI).toFloat() // ~1.26 m
+    // ✅ Boundary size — 1000 sqm area radius
+    private val radius = 17.841f // 1000 square meters radius
     private val circleCoords = generateCircleVertices(radius, 128)
 
     // ✅ Center marker — small disk (~0.05 m radius)
