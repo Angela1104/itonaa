@@ -8,13 +8,11 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- Optional storage permission if you save images outside app -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <!-- Features -->
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
-    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
 
     <application
         android:allowBackup="true"
@@ -25,6 +23,11 @@
         android:roundIcon="@drawable/bakhawone"
         android:supportsRtl="true"
         android:theme="@style/Theme.Thesisbakhawone.NoActionBar">
+
+        <!-- ARCore Requirement -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="required" />
 
         <!-- Main Dashboard Activity -->
         <activity
@@ -44,11 +47,10 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.Thesisbakhawone.NoActionBar" />
 
-        <!-- Camera Activity (if needed) -->
+        <!-- Camera Activity (optional) -->
         <activity
             android:name=".CameraActivity"
             android:exported="false"
             android:theme="@style/Theme.Thesisbakhawone.NoActionBar" />
-
     </application>
 </manifest>

@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.bakhawone.thesis_bakhawone"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.bakhawone.thesis_bakhawone"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -42,7 +42,7 @@ android {
 
 dependencies {
     // ARCore
-    implementation("com.google.ar:core:1.45.0")
+    implementation("com.google.ar:core:1.49.0") // latest stable
 
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
@@ -65,7 +65,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("io.coil-kt:coil-compose:2.4.0")
 
-    // CameraX
+    // CameraX (optional)
     implementation("androidx.camera:camera-core:1.3.0")
     implementation("androidx.camera:camera-camera2:1.3.0")
     implementation("androidx.camera:camera-lifecycle:1.3.0")

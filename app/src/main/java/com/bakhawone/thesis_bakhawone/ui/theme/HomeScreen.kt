@@ -40,7 +40,6 @@ fun HomeScreen() {
     var showConfirmDialog by remember { mutableStateOf(false) }
     var currentGeoPoint by remember { mutableStateOf<GeoPoint?>(null) }
 
-    // Anonymous sign-in
     LaunchedEffect(Unit) {
         if (auth.currentUser == null) {
             auth.signInAnonymously()
@@ -58,7 +57,6 @@ fun HomeScreen() {
     ) { permissions ->
         hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-
         if (hasLocationPermission) {
             locationOverlay?.enableMyLocation()
             locationOverlay?.enableFollowLocation()
@@ -75,7 +73,6 @@ fun HomeScreen() {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // MapView setup
         AndroidView(
             factory = { ctx ->
                 MapView(ctx).apply {
@@ -83,7 +80,6 @@ fun HomeScreen() {
                     setTileSource(TileSourceFactory.MAPNIK)
                     setBuiltInZoomControls(true)
                     setMultiTouchControls(true)
-
                     val bounds = BoundingBox(10.5, 118.85, 9.6, 117.8)
                     setScrollableAreaLimitDouble(bounds)
                     controller.setZoom(12.0)
@@ -102,7 +98,6 @@ fun HomeScreen() {
             modifier = Modifier.fillMaxSize()
         )
 
-        // Confirmation dialog
         if (showConfirmDialog && currentGeoPoint != null) {
             AlertDialog(
                 onDismissRequest = { showConfirmDialog = false },
@@ -120,70 +115,49 @@ fun HomeScreen() {
                     }
                 },
                 confirmButton = {
-                    Button(
-                        onClick = {
-                            val loc = currentGeoPoint!!
-                            val userId = auth.currentUser?.uid ?: return@Button
+                    Button(onClick = {
+                        val loc = currentGeoPoint!!
+                        val userId = auth.currentUser?.uid ?: return@Button
+                        val locationData = hashMapOf(
+                            "name" to "Centerpoint",
+                            "address" to "Saved from current location",
+                            "latitude" to loc.latitude,
+                            "longitude" to loc.longitude,
+                            "areaSqm" to 5,
+                            "timestamp" to System.currentTimeMillis()
+                        )
 
-                            val locationData = hashMapOf(
-                                "name" to "Centerpoint",
-                                "address" to "Saved from current location",
-                                "latitude" to loc.latitude,
-                                "longitude" to loc.longitude,
-                                "areaSqm" to 5,
-                                "timestamp" to System.currentTimeMillis()
-                            )
-
-                            db.collection("users")
-                                .document(userId)
-                                .collection("centerpoints")
-                                .add(locationData)
-                                .addOnSuccessListener {
-                                    Toast.makeText(context, "Centerpoint saved successfully!", Toast.LENGTH_SHORT).show()
-
-                                    // Dismiss dialog and clear state
-                                    showConfirmDialog = false
-                                    currentGeoPoint = null
-
-                                    // Launch ARActivity on UI thread
-                                    val activity = context as? android.app.Activity
-                                    activity?.runOnUiThread {
-                                        val intent = Intent(activity, ARActivity::class.java).apply {
-                                            putExtra("deviceStartLat", loc.latitude)
-                                            putExtra("deviceStartLon", loc.longitude)
-                                        }
-                                        activity.startActivity(intent)
+                        db.collection("users").document(userId).collection("centerpoints")
+                            .add(locationData)
+                            .addOnSuccessListener {
+                                showConfirmDialog = false
+                                currentGeoPoint = null
+                                val activity = context as? android.app.Activity
+                                activity?.runOnUiThread {
+                                    val intent = Intent(activity, ARActivity::class.java).apply {
+                                        putExtra("deviceStartLat", loc.latitude)
+                                        putExtra("deviceStartLon", loc.longitude)
                                     }
+                                    activity.startActivity(intent)
                                 }
-                                .addOnFailureListener {
-                                    Toast.makeText(context, "Failed to save to Firebase: ${it.message}", Toast.LENGTH_LONG).show()
-                                }
-                        }
-                    ) {
-                        Text("Yes, Save & Open AR")
-                    }
+                            }
+                            .addOnFailureListener {
+                                Toast.makeText(context, "Failed to save: ${it.message}", Toast.LENGTH_LONG).show()
+                            }
+                    }) { Text("Yes, Save & Open AR") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showConfirmDialog = false }) {
-                        Text("Cancel")
-                    }
+                    TextButton(onClick = { showConfirmDialog = false }) { Text("Cancel") }
                 }
             )
         }
 
-        // FloatingActionButton
         FloatingActionButton(
             onClick = {
                 if (!hasLocationPermission) {
-                    locationPermissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                        )
-                    )
+                    locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                     return@FloatingActionButton
                 }
-
                 val loc = locationOverlay?.myLocation
                 if (loc != null) {
                     val geo = GeoPoint(loc.latitude, loc.longitude)
@@ -192,14 +166,12 @@ fun HomeScreen() {
                     currentGeoPoint = geo
                     showConfirmDialog = true
                 } else {
-                    Toast.makeText(context, "Getting current location... Please wait.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Getting current location...", Toast.LENGTH_SHORT).show()
                     locationOverlay?.enableMyLocation()
                     locationOverlay?.enableFollowLocation()
                 }
             },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             containerColor = MaterialTheme.colorScheme.primary
         ) {
             Icon(Icons.Filled.MyLocation, contentDescription = "Center on My Location")
