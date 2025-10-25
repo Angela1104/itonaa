@@ -40,7 +40,7 @@ fun HomeScreen() {
     var showConfirmDialog by remember { mutableStateOf(false) }
     var currentGeoPoint by remember { mutableStateOf<GeoPoint?>(null) }
 
-    // ✅ Anonymous sign-in (ensures every device has a unique UID)
+    // Anonymous sign-in
     LaunchedEffect(Unit) {
         if (auth.currentUser == null) {
             auth.signInAnonymously()
@@ -53,7 +53,6 @@ fun HomeScreen() {
         }
     }
 
-    // 🔹 Permission launcher
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -69,20 +68,14 @@ fun HomeScreen() {
         }
     }
 
-    // 🔹 Check permission on launch
     LaunchedEffect(Unit) {
-        val fineGranted = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        val coarseGranted = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         hasLocationPermission = fineGranted || coarseGranted
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-
-        // 🗺️ MapView setup
+        // MapView setup
         AndroidView(
             factory = { ctx ->
                 MapView(ctx).apply {
@@ -109,7 +102,7 @@ fun HomeScreen() {
             modifier = Modifier.fillMaxSize()
         )
 
-        // 🗨️ Confirmation dialog for saving location
+        // Confirmation dialog
         if (showConfirmDialog && currentGeoPoint != null) {
             AlertDialog(
                 onDismissRequest = { showConfirmDialog = false },
@@ -121,7 +114,7 @@ fun HomeScreen() {
                         Text(
                             "Latitude: ${String.format("%.6f", currentGeoPoint!!.latitude)}\n" +
                                     "Longitude: ${String.format("%.6f", currentGeoPoint!!.longitude)}\n" +
-                                    "Area: 500 sqm",
+                                    "Area: 5 sqm",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -137,7 +130,7 @@ fun HomeScreen() {
                                 "address" to "Saved from current location",
                                 "latitude" to loc.latitude,
                                 "longitude" to loc.longitude,
-                                "areaSqm" to 500,
+                                "areaSqm" to 5,
                                 "timestamp" to System.currentTimeMillis()
                             )
 
@@ -146,25 +139,25 @@ fun HomeScreen() {
                                 .collection("centerpoints")
                                 .add(locationData)
                                 .addOnSuccessListener {
-                                    Toast.makeText(
-                                        context,
-                                        "Centerpoint saved successfully!",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    Toast.makeText(context, "Centerpoint saved successfully!", Toast.LENGTH_SHORT).show()
 
-                                    // 🚀 Open ARActivity after successful save
-                                    val intent = Intent(context, ARActivity::class.java)
-                                    context.startActivity(intent)
+                                    // Dismiss dialog and clear state
+                                    showConfirmDialog = false
+                                    currentGeoPoint = null
+
+                                    // Launch ARActivity on UI thread
+                                    val activity = context as? android.app.Activity
+                                    activity?.runOnUiThread {
+                                        val intent = Intent(activity, ARActivity::class.java).apply {
+                                            putExtra("deviceStartLat", loc.latitude)
+                                            putExtra("deviceStartLon", loc.longitude)
+                                        }
+                                        activity.startActivity(intent)
+                                    }
                                 }
                                 .addOnFailureListener {
-                                    Toast.makeText(
-                                        context,
-                                        "Failed to save to Firebase: ${it.message}",
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                    Toast.makeText(context, "Failed to save to Firebase: ${it.message}", Toast.LENGTH_LONG).show()
                                 }
-
-                            showConfirmDialog = false
                         }
                     ) {
                         Text("Yes, Save & Open AR")
@@ -178,7 +171,7 @@ fun HomeScreen() {
             )
         }
 
-        // 📍 FloatingActionButton — Centers map on current location
+        // FloatingActionButton
         FloatingActionButton(
             onClick = {
                 if (!hasLocationPermission) {
@@ -199,11 +192,7 @@ fun HomeScreen() {
                     currentGeoPoint = geo
                     showConfirmDialog = true
                 } else {
-                    Toast.makeText(
-                        context,
-                        "Getting current location... Please wait.",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    Toast.makeText(context, "Getting current location... Please wait.", Toast.LENGTH_SHORT).show()
                     locationOverlay?.enableMyLocation()
                     locationOverlay?.enableFollowLocation()
                 }

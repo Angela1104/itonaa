@@ -7,9 +7,13 @@ import android.util.Log
 import com.google.ar.core.*
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
-import kotlin.math.*
+import kotlin.math.cos
 
-class ARRenderer(private val session: Session) : GLSurfaceView.Renderer {
+class ARRenderer(
+    private val session: Session,
+    private val deviceStartLat: Double,
+    private val deviceStartLon: Double
+) : GLSurfaceView.Renderer {
 
     private var centerLat: Double? = null
     private var centerLon: Double? = null
@@ -18,6 +22,7 @@ class ARRenderer(private val session: Session) : GLSurfaceView.Renderer {
     private lateinit var surfaceView: GLSurfaceView
     private val cameraBackgroundRenderer = CameraBackgroundRenderer()
     private val boundaryRenderer = BoundaryRenderer()
+    private var deviceStartPose: Pose? = null
 
     fun getGLSurfaceView(context: Context): GLSurfaceView {
         surfaceView = GLSurfaceView(context)
@@ -28,15 +33,9 @@ class ARRenderer(private val session: Session) : GLSurfaceView.Renderer {
         return surfaceView
     }
 
-    fun onResume() {
-        surfaceView.onResume()
-    }
+    fun onResume() = surfaceView.onResume()
+    fun onPause() = surfaceView.onPause()
 
-    fun onPause() {
-        surfaceView.onPause()
-    }
-
-    /** Receives the Firestore centerpoint */
     fun setCenterPoint(lat: Double, lon: Double) {
         centerLat = lat
         centerLon = lon
@@ -45,7 +44,7 @@ class ARRenderer(private val session: Session) : GLSurfaceView.Renderer {
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
-        cameraBackgroundRenderer.createOnGlThread()
+        cameraBackgroundRenderer.createOnGlThread(session)
         boundaryRenderer.init()
     }
 
@@ -62,25 +61,28 @@ class ARRenderer(private val session: Session) : GLSurfaceView.Renderer {
 
         if (camera.trackingState != TrackingState.TRACKING) return
 
-        // Once we have a centerpoint, anchor it once
-        if (centerLat != null && centerLon != null && anchor == null) {
-            createAnchorAtCurrentPose(camera)
+        if (deviceStartPose == null) deviceStartPose = camera.displayOrientedPose
+
+        // Create anchor only once
+        if (centerLat != null && centerLon != null && anchor == null && deviceStartPose != null) {
+            createStableAnchor()
         }
 
-        // Draw the boundary around the anchor
-        anchor?.let {
-            val pose = it.pose
-            boundaryRenderer.draw(pose)
-        }
+        // Draw boundary relative to anchor each frame
+        anchor?.let { boundaryRenderer.draw(it.pose) }
     }
 
-    private fun createAnchorAtCurrentPose(camera: Camera) {
-        try {
-            val framePose = camera.displayOrientedPose
-            anchor = session.createAnchor(framePose)
-            Log.d("ARRenderer", "Anchor created at AR center for lat/lon: $centerLat, $centerLon")
-        } catch (e: Exception) {
-            Log.e("ARRenderer", "Failed to create anchor: ${e.message}")
-        }
+    private fun createStableAnchor() {
+        val devicePose = deviceStartPose ?: return
+
+        val latOffset = ((centerLat!! - deviceStartLat) * 111000).toFloat()
+        val lonOffset = ((centerLon!! - deviceStartLon) * 111000 * cos(deviceStartLat * Math.PI / 180)).toFloat()
+        val forwardDistance = 1.5f
+        val heightOffset = 0.15f
+
+        val anchorPose = Pose.makeTranslation(lonOffset, heightOffset, -latOffset - forwardDistance)
+        anchor = session.createAnchor(devicePose.compose(anchorPose))
+
+        Log.d("ARRenderer", "Stable anchor created for centerpoint")
     }
 }
