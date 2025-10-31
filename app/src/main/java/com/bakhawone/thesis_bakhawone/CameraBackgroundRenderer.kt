@@ -20,9 +20,11 @@ class CameraBackgroundRenderer {
 
     private lateinit var vertexBuffer: FloatBuffer
     private lateinit var texCoordBuffer: FloatBuffer
+    private lateinit var texCoordInput: FloatBuffer
+    private lateinit var texCoordOutput: FloatBuffer
+
     private val texMatrix = FloatArray(16)
 
-    // Fullscreen quad vertices (X, Y)
     private val quadCoords = floatArrayOf(
         -1f, -1f,
         1f, -1f,
@@ -30,7 +32,6 @@ class CameraBackgroundRenderer {
         1f,  1f
     )
 
-    // Default texture coordinates (S, T)
     private val texCoords = floatArrayOf(
         0f, 1f,
         1f, 1f,
@@ -51,21 +52,25 @@ class CameraBackgroundRenderer {
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
         session.setCameraTextureName(textureId)
 
-        // --- Vertex buffer ---
         vertexBuffer = ByteBuffer.allocateDirect(quadCoords.size * 4)
             .order(ByteOrder.nativeOrder())
             .asFloatBuffer()
-        for (v in quadCoords) vertexBuffer.put(v)
-        vertexBuffer.position(0)
+            .apply { put(quadCoords); position(0) }
 
-        // --- Texture coord buffer ---
         texCoordBuffer = ByteBuffer.allocateDirect(texCoords.size * 4)
             .order(ByteOrder.nativeOrder())
             .asFloatBuffer()
-        for (t in texCoords) texCoordBuffer.put(t)
-        texCoordBuffer.position(0)
+            .apply { put(texCoords); position(0) }
 
-        // --- Vertex shader ---
+        texCoordInput = ByteBuffer.allocateDirect(texCoords.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .apply { put(texCoords); position(0) }
+
+        texCoordOutput = ByteBuffer.allocateDirect(texCoords.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+
         val vertexShaderCode = """
             attribute vec4 vPosition;
             attribute vec2 vTexCoord;
@@ -77,7 +82,6 @@ class CameraBackgroundRenderer {
             }
         """.trimIndent()
 
-        // --- Fragment shader ---
         val fragmentShaderCode = """
             #extension GL_OES_EGL_image_external : require
             precision mediump float;
@@ -95,6 +99,7 @@ class CameraBackgroundRenderer {
             GLES20.glAttachShader(it, vertexShader)
             GLES20.glAttachShader(it, fragmentShader)
             GLES20.glLinkProgram(it)
+            GLES20.glUseProgram(it)
         }
 
         positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
@@ -106,24 +111,11 @@ class CameraBackgroundRenderer {
     fun draw(frame: Frame) {
         GLES20.glUseProgram(program)
 
-        // --- Convert arrays to FloatBuffers (ARCore expects FloatBuffer args) ---
-        val texCoordInput = ByteBuffer.allocateDirect(texCoords.size * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-        for (t in texCoords) texCoordInput.put(t)
-        texCoordInput.position(0)
-
-        val texCoordOutput = ByteBuffer.allocateDirect(texCoords.size * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-
-        // --- Apply ARCore’s display transform ---
         frame.transformDisplayUvCoords(texCoordInput, texCoordOutput)
         texCoordOutput.position(0)
 
         Matrix.setIdentityM(texMatrix, 0)
 
-        // --- Bind buffers and draw ---
         GLES20.glEnableVertexAttribArray(positionHandle)
         GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
 
@@ -141,9 +133,9 @@ class CameraBackgroundRenderer {
         GLES20.glDisableVertexAttribArray(texCoordHandle)
     }
 
-    private fun loadShader(type: Int, shaderCode: String): Int {
+    private fun loadShader(type: Int, code: String): Int {
         val shader = GLES20.glCreateShader(type)
-        GLES20.glShaderSource(shader, shaderCode)
+        GLES20.glShaderSource(shader, code)
         GLES20.glCompileShader(shader)
         return shader
     }
