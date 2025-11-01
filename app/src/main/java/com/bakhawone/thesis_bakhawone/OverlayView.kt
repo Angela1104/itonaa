@@ -49,7 +49,13 @@ fun OverlayView(
                 val isRhizo = detection.label.contains("Rhizophora", ignoreCase = true)
                 val isDead = detection.label.contains("Dead", ignoreCase = true)
                 val isAlive = detection.label.contains("Alive", ignoreCase = true)
-                val color = if (isRhizo && isDead) Color.Red else Color.Green
+                
+                // Color coding: Green for Alive Rhizophora, Red for Dead Rhizophora, Yellow for Non-Rhizophora
+                val color = when {
+                    isRhizo && isAlive -> Color(0xFF4CAF50) // 🟩 Green
+                    isRhizo && isDead -> Color(0xFFF44336)  // 🟥 Red
+                    else -> Color(0xFFFFEB3B) // 🟨 Yellow (Non-Rhizophora)
+                }
 
                 // Draw bounding box
                 drawRect(
@@ -60,13 +66,15 @@ fun OverlayView(
                 )
 
                 // Draw label text above the box
-                val labelText = if (isRhizo && isAlive) {
-                    val dbhText = detection.dbhCm?.let { String.format("DBH: %.1f cm", it) } ?: ""
-                    if (dbhText.isNotEmpty()) "Alive Rhizophora - $dbhText" else "Alive Rhizophora"
-                } else if (isRhizo && isDead) {
-                    "Dead Rhizophora"
-                } else {
-                    detection.label
+                // Format: "Alive Rhizophora (DBH: 12.5 cm)" or "Dead Rhizophora" or show Non-Rhizophora with ⚠
+                val labelText = when {
+                    isRhizo && isAlive -> {
+                        val dbhText = detection.dbhCm?.let { String.format("Alive Rhizophora (DBH: %.1f cm)", it) }
+                            ?: "Alive Rhizophora"
+                        dbhText
+                    }
+                    isRhizo && isDead -> "Dead Rhizophora"
+                    else -> "⚠ ${detection.label}" // Non-Rhizophora with warning indicator
                 }
                 canvas.nativeCanvas.drawText(
                     labelText,

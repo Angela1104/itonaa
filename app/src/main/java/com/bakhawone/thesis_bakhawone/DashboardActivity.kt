@@ -30,6 +30,9 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.Polygon
 import kotlin.math.*
+import com.google.firebase.firestore.FirebaseFirestore
+import java.text.SimpleDateFormat
+import java.util.*
 
 // Data model shared at top-level (kept here so Dashboard and other screens can reference)
 data class PinnedLocation(
@@ -90,7 +93,7 @@ object GeoUtils {
         polygon.fillColor = 0x320064FF.toInt() // Semi-transparent blue using integer color
         polygon.strokeColor = 0xB40000FF.toInt() // Blue border using integer color
         polygon.strokeWidth = 3.0f
-        polygon.title = "500 sqm Area"
+        polygon.title = "1000 sqm Area"
 
         return polygon
     }
@@ -103,11 +106,58 @@ class DashboardActivity : ComponentActivity() {
         // OSMDroid config (same as original)
         Configuration.getInstance().load(applicationContext, getPreferences(MODE_PRIVATE))
 
+        // Initialize anonymous session
+        initializeSession()
+
         setContent {
             ThesisbakhawoneTheme {
                 DashboardApp()
             }
         }
+    }
+
+    private fun initializeSession() {
+        val sessionId = SessionManager.getOrCreateSessionId(applicationContext)
+        val db = FirebaseFirestore.getInstance()
+
+        // Check if session document already exists (in case of app restart)
+        db.collection("devices").document(sessionId)
+            .get()
+            .addOnSuccessListener { document ->
+                if (!document.exists()) {
+                    // Create new session document
+                    val sessionData = hashMapOf(
+                        "start_time" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }.format(Date()),
+                        "status" to "active"
+                    )
+                    db.collection("devices").document(sessionId)
+                        .set(sessionData)
+                        .addOnSuccessListener {
+                            android.util.Log.d("DashboardActivity", "Session initialized: $sessionId")
+                        }
+                        .addOnFailureListener { e ->
+                            android.util.Log.e("DashboardActivity", "Failed to initialize session", e)
+                        }
+                } else {
+                    // Session exists, update status to active
+                    db.collection("devices").document(sessionId)
+                        .update("status", "active")
+                }
+            }
+            .addOnFailureListener { e ->
+                android.util.Log.e("DashboardActivity", "Failed to check session", e)
+                // Try to create anyway
+                val sessionData = hashMapOf(
+                    "start_time" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }.format(Date()),
+                    "status" to "active"
+                )
+                db.collection("devices").document(sessionId)
+                    .set(sessionData)
+            }
     }
 }
 

@@ -169,9 +169,9 @@ fun ReportsScreen(pinnedLocations: List<PinnedLocation>) {
                             )
 
                             // Show area information
-                            val radius = GeoUtils.calculateRadiusForArea(500.0)
+                            val radius = GeoUtils.calculateRadiusForArea(1000.0)
                             Text(
-                                "Area: 500 sqm (Radius: ${String.format("%.1f", radius)}m)",
+                                "Area: 1000 sqm (Radius: ${String.format("%.1f", radius)}m)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(bottom = 8.dp)

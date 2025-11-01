@@ -10,27 +10,21 @@ import com.google.ar.core.*
 import com.google.ar.core.exceptions.NotYetAvailableException
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
-import kotlin.math.cos
 
 class ARRenderer(
     private val session: Session,
-    private val deviceStartLat: Double,
-    private val deviceStartLon: Double,
     private val context: Context,
     // ✅ Visibility callback — called when boundary becomes visible/hidden
     private val onBoundaryVisibleChanged: ((Boolean) -> Unit)? = null
 ) : GLSurfaceView.Renderer {
 
-    private var centerLat: Double? = null
-    private var centerLon: Double? = null
     private var anchor: Anchor? = null
-    private var planeFound = false
     private var boundaryVisible = false // ✅ track current visibility state
 
     private lateinit var surfaceView: GLSurfaceView
     private val cameraBackgroundRenderer = CameraBackgroundRenderer()
     private val boundaryRenderer = BoundaryRenderer()
-    private var detectedPlane: Plane? = null
+    private val planeRenderer = PlaneRenderer()
     private var lastFrame: Frame? = null
     private var lastCamera: Camera? = null
     private val boundaryRadiusMeters = 17.841f
@@ -51,12 +45,38 @@ class ARRenderer(
 
     fun onResume() = surfaceView.onResume()
     fun onPause() = surfaceView.onPause()
-    fun setCenterPoint(lat: Double, lon: Double) { centerLat = lat; centerLon = lon }
+    
+    /**
+     * Set centerpoint from a tapped position on a plane.
+     * Creates an anchor at the hit position.
+     */
+    fun setCenterpointFromHit(hitPose: Pose): Boolean {
+        // Only allow one centerpoint per session
+        if (anchor != null) {
+            Log.w("ARRenderer", "Centerpoint already set. Only one allowed per session.")
+            return false
+        }
+        
+        try {
+            anchor = session.createAnchor(hitPose)
+            Log.d("ARRenderer", "Centerpoint set from tap at pose: $hitPose")
+            return true
+        } catch (e: Exception) {
+            Log.e("ARRenderer", "Failed to create anchor", e)
+            return false
+        }
+    }
+    
+    /**
+     * Check if centerpoint has been set
+     */
+    fun isCenterpointSet(): Boolean = anchor != null
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         cameraBackgroundRenderer.createOnGlThread(session)
         boundaryRenderer.init()
+        planeRenderer.init()
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -95,27 +115,20 @@ class ARRenderer(
 
         if (camera.trackingState != TrackingState.TRACKING) return
 
-        // ✅ Detect first horizontal plane
-        if (!planeFound) {
+        // ✅ Render all detected planes as gray meshes ONLY when centerpoint is not set
+        // Once centerpoint is set (anchor exists), hide the gray meshes
+        if (anchor == null) {
             for (plane in session.getAllTrackables(Plane::class.java)) {
-                if (plane.trackingState == TrackingState.TRACKING &&
+                if (plane.trackingState == TrackingState.TRACKING && 
                     plane.type == Plane.Type.HORIZONTAL_UPWARD_FACING) {
-                    detectedPlane = plane
-                    planeFound = true
-                    Log.d("ARRenderer", "Plane detected! Center: ${plane.centerPose}")
-                    break
+                    planeRenderer.draw(plane, camera)
                 }
             }
         }
 
-        // ✅ Create anchor once the plane and centerpoint are both known
-        if (planeFound && anchor == null && centerLat != null && centerLon != null) {
-            createStableAnchor()
-        }
-
         // ✅ Check if anchor is still valid
         if (anchor != null && anchor!!.trackingState != TrackingState.TRACKING) {
-            Log.d("ARRenderer", "Anchor lost tracking, recreating...")
+            Log.d("ARRenderer", "Anchor lost tracking")
             anchor = null
             if (boundaryVisible) {
                 boundaryVisible = false
@@ -123,7 +136,7 @@ class ARRenderer(
             }
         }
 
-        // ✅ Draw only if the anchor exists and is tracking
+        // ✅ Draw boundary only if centerpoint (anchor) is set and tracking
         if (anchor != null && anchor!!.trackingState == TrackingState.TRACKING) {
             boundaryRenderer.draw(anchor!!.pose, camera)
             if (!boundaryVisible) {
@@ -140,24 +153,6 @@ class ARRenderer(
         }
     }
 
-    private fun createStableAnchor() {
-        val plane = detectedPlane ?: return
-        val centerPose = plane.centerPose
-
-        // Convert GPS difference to local flat coordinates (meters)
-        val latOffset = ((centerLat!! - deviceStartLat) * 111000).toFloat()
-        val lonOffset = ((centerLon!! - deviceStartLon) * 111000 *
-                cos(deviceStartLat * Math.PI / 180)).toFloat()
-
-        // Place the anchor directly on the plane surface (Y from plane)
-        val adjustedPose = centerPose.compose(Pose.makeTranslation(lonOffset, 0f, -latOffset))
-        anchor = session.createAnchor(adjustedPose)
-
-        Log.d("ARRenderer", "Stable anchor created at lat: $centerLat, lon: $centerLon")
-        Log.d("ARRenderer", "Device start: lat: $deviceStartLat, lon: $deviceStartLon")
-        Log.d("ARRenderer", "Offsets: lat: $latOffset, lon: $lonOffset")
-    }
-
     // === Public helpers for detection enrichment ===
     fun getFxPixels(): Float? {
         val camera = lastCamera ?: return null
@@ -168,35 +163,81 @@ class ARRenderer(
     }
 
     fun worldPointAndDepthFromScreen(screenX: Float, screenY: Float): Pair<FloatArray, Float>? {
-        val frame = lastFrame ?: return null
-        val anchorPose = anchor?.pose ?: return null
-        val hitList = try { frame.hitTest(screenX, screenY) } catch (_: Exception) { emptyList() }
-        val best = hitList.firstOrNull { it.trackable is Plane && (it.trackable as Plane).isPoseInPolygon(it.hitPose) }
-            ?: return null
-        val cameraPose = frame.camera.displayOrientedPose
-        val hitPose = best.hitPose
-        val dx = hitPose.tx() - cameraPose.tx()
-        val dy = hitPose.ty() - cameraPose.ty()
-        val dz = hitPose.tz() - cameraPose.tz()
-        val depth = kotlin.math.sqrt(dx*dx + dy*dy + dz*dz)
-        // vector relative to anchor origin in world space
-        val anchorInv = floatArrayOf(
-            0f,0f,0f,0f, 0f,0f,0f,0f, 0f,0f,0f,0f, 0f,0f,0f
-        )
-        val anchorMatrix = FloatArray(16)
-        anchorPose.toMatrix(anchorMatrix, 0)
-        android.opengl.Matrix.invertM(anchorInv, 0, anchorMatrix, 0)
-        val hitMatrix = FloatArray(16)
-        hitPose.toMatrix(hitMatrix, 0)
-        val local = FloatArray(16)
-        android.opengl.Matrix.multiplyMM(local, 0, anchorInv, 0, hitMatrix, 0)
-        val localVec = floatArrayOf(local[12], local[13], local[14])
-        return localVec to depth
+        try {
+            val frame = lastFrame ?: return null
+            val anchor = anchor ?: return null
+            
+            // Check if anchor is tracking
+            if (anchor.trackingState != TrackingState.TRACKING) {
+                Log.w("ARRenderer", "Anchor not tracking")
+                return null
+            }
+            
+            val anchorPose = anchor.pose
+            val hitList = try { 
+                frame.hitTest(screenX, screenY) 
+            } catch (e: Exception) { 
+                Log.w("ARRenderer", "Hit test failed", e)
+                emptyList() 
+            }
+            
+            val best = hitList.firstOrNull { 
+                it.trackable is Plane && 
+                (it.trackable as Plane).isPoseInPolygon(it.hitPose) 
+            } ?: return null
+            
+            val cameraPose = frame.camera.displayOrientedPose
+            val hitPose = best.hitPose
+            val dx = hitPose.tx() - cameraPose.tx()
+            val dy = hitPose.ty() - cameraPose.ty()
+            val dz = hitPose.tz() - cameraPose.tz()
+            val depth = kotlin.math.sqrt(dx*dx + dy*dy + dz*dz)
+            
+            // vector relative to anchor origin in world space
+            val anchorInv = FloatArray(16)
+            val anchorMatrix = FloatArray(16)
+            anchorPose.toMatrix(anchorMatrix, 0)
+            android.opengl.Matrix.invertM(anchorInv, 0, anchorMatrix, 0)
+            
+            val hitMatrix = FloatArray(16)
+            hitPose.toMatrix(hitMatrix, 0)
+            val local = FloatArray(16)
+            android.opengl.Matrix.multiplyMM(local, 0, anchorInv, 0, hitMatrix, 0)
+            val localVec = floatArrayOf(local[12], local[13], local[14])
+            
+            return localVec to depth
+        } catch (e: Exception) {
+            Log.e("ARRenderer", "Error in worldPointAndDepthFromScreen", e)
+            return null
+        }
     }
 
     fun isLocalPointInsideBoundary(localPoint: FloatArray): Boolean {
         // distance in XZ plane from center
         val d = kotlin.math.sqrt(localPoint[0]*localPoint[0] + localPoint[2]*localPoint[2])
         return d <= boundaryRadiusMeters
+    }
+    
+    /**
+     * Perform hit test on screen coordinates to find tapped plane.
+     * Returns the hit pose if a plane was tapped, null otherwise.
+     */
+    fun hitTestPlane(screenX: Float, screenY: Float): Pose? {
+        val frame = lastFrame ?: return null
+        val hitList = try { 
+            frame.hitTest(screenX, screenY) 
+        } catch (e: Exception) { 
+            Log.e("ARRenderer", "Hit test failed", e)
+            emptyList() 
+        }
+        
+        // Find first hit that is on a horizontal plane
+        val planeHit = hitList.firstOrNull { hit ->
+            hit.trackable is Plane && 
+            (hit.trackable as Plane).type == Plane.Type.HORIZONTAL_UPWARD_FACING &&
+            (hit.trackable as Plane).isPoseInPolygon(hit.hitPose)
+        }
+        
+        return planeHit?.hitPose
     }
 }

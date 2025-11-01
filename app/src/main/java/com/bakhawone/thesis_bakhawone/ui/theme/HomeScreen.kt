@@ -18,8 +18,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.bakhawone.thesis_bakhawone.ARActivity
+import com.bakhawone.thesis_bakhawone.OSMGeocodingUtils
+import com.bakhawone.thesis_bakhawone.SessionManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.Timestamp
+import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
@@ -27,20 +31,30 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Composable
 fun HomeScreen() {
     val context = LocalContext.current
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
+    val scope = rememberCoroutineScope()
 
     var mapView by remember { mutableStateOf<MapView?>(null) }
     var locationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
     var hasLocationPermission by remember { mutableStateOf(false) }
-    var showConfirmDialog by remember { mutableStateOf(false) }
+    var showNameInputDialog by remember { mutableStateOf(false) }
     var currentGeoPoint by remember { mutableStateOf<GeoPoint?>(null) }
+    var geocodedAddress by remember { mutableStateOf<String?>(null) }
+    var locationName by remember { mutableStateOf("") }
+    var isGeocoding by remember { mutableStateOf(false) }
+    var sessionId by remember { mutableStateOf<String?>(null) }
 
+    // Get session ID on launch
     LaunchedEffect(Unit) {
+        sessionId = SessionManager.getOrCreateSessionId(context)
+        
         if (auth.currentUser == null) {
             auth.signInAnonymously()
                 .addOnSuccessListener {
@@ -98,57 +112,113 @@ fun HomeScreen() {
             modifier = Modifier.fillMaxSize()
         )
 
-        if (showConfirmDialog && currentGeoPoint != null) {
+        // Name input dialog - shown after geocoding is complete
+        if (showNameInputDialog && currentGeoPoint != null) {
             AlertDialog(
-                onDismissRequest = { showConfirmDialog = false },
-                title = { Text("Save Centerpoint") },
+                onDismissRequest = { 
+                    showNameInputDialog = false
+                    currentGeoPoint = null
+                    geocodedAddress = null
+                    locationName = ""
+                },
+                title = { Text("Enter Location Name") },
                 text = {
                     Column {
-                        Text("Do you want to save your current location as the centerpoint?")
+                        Text("Please enter a name for this location:")
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = locationName,
+                            onValueChange = { locationName = it },
+                            label = { Text("Location Name") },
+                            placeholder = { Text(geocodedAddress ?: "Enter name") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Latitude: ${String.format("%.6f", currentGeoPoint!!.latitude)}\n" +
-                                    "Longitude: ${String.format("%.6f", currentGeoPoint!!.longitude)}\n" +
-                                    "Area: 5 sqm",
+                            "Address: ${geocodedAddress ?: "Unknown"}\n" +
+                                    "Coordinates: ${String.format("%.6f", currentGeoPoint!!.latitude)}, ${String.format("%.6f", currentGeoPoint!!.longitude)}",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
                 },
                 confirmButton = {
-                    Button(onClick = {
-                        val loc = currentGeoPoint!!
-                        val userId = auth.currentUser?.uid ?: return@Button
-                        val locationData = hashMapOf(
-                            "name" to "Centerpoint",
-                            "address" to "Saved from current location",
-                            "latitude" to loc.latitude,
-                            "longitude" to loc.longitude,
-                            "areaSqm" to 5,
-                            "timestamp" to System.currentTimeMillis()
-                        )
-
-                        db.collection("users").document(userId).collection("centerpoints")
-                            .add(locationData)
-                            .addOnSuccessListener {
-                                showConfirmDialog = false
-                                currentGeoPoint = null
-                                val activity = context as? android.app.Activity
-                                activity?.runOnUiThread {
-                                    val intent = Intent(activity, ARActivity::class.java).apply {
-                                        putExtra("deviceStartLat", loc.latitude)
-                                        putExtra("deviceStartLon", loc.longitude)
+                    Button(
+                        onClick = {
+                            if (locationName.isBlank()) {
+                                Toast.makeText(context, "Please enter a location name", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            
+                            val loc = currentGeoPoint!!
+                            val name = locationName.trim()
+                            val address = geocodedAddress ?: "${loc.latitude}, ${loc.longitude}"
+                            val sId = sessionId ?: SessionManager.getOrCreateSessionId(context)
+                            
+                            // Save pinned location to Firebase under /devices/{session_id}/pinned_locations/
+                            val now = Date()
+                            val locationData = hashMapOf(
+                                "name" to name,
+                                "latitude" to loc.latitude,
+                                "longitude" to loc.longitude,
+                                "address" to address,
+                                "timestamp" to Timestamp.now(), // Firestore Timestamp for querying
+                                "timestamp_iso" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                                    timeZone = TimeZone.getTimeZone("UTC")
+                                }.format(now) // ISO string for human readability
+                            )
+                            
+                            db.collection("devices").document(sId)
+                                .collection("pinned_locations")
+                                .add(locationData)
+                                .addOnSuccessListener { documentReference ->
+                                    showNameInputDialog = false
+                                    currentGeoPoint = null
+                                    geocodedAddress = null
+                                    locationName = ""
+                                    Toast.makeText(context, "Location saved successfully", Toast.LENGTH_SHORT).show()
+                                    
+                                    // Transition to AR Activity
+                                    val activity = context as? android.app.Activity
+                                    activity?.let {
+                                        val intent = Intent(it, ARActivity::class.java).apply {
+                                            putExtra("deviceStartLat", loc.latitude)
+                                            putExtra("deviceStartLon", loc.longitude)
+                                        }
+                                        it.startActivity(intent)
                                     }
-                                    activity.startActivity(intent)
                                 }
-                            }
-                            .addOnFailureListener {
-                                Toast.makeText(context, "Failed to save: ${it.message}", Toast.LENGTH_LONG).show()
-                            }
-                    }) { Text("Yes, Save & Open AR") }
+                                .addOnFailureListener { e ->
+                                    Toast.makeText(context, "Failed to save location: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                        },
+                        enabled = locationName.isNotBlank()
+                    ) { Text("Save & Open AR") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showConfirmDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { 
+                        showNameInputDialog = false
+                        currentGeoPoint = null
+                        geocodedAddress = null
+                        locationName = ""
+                    }) { Text("Cancel") }
                 }
+            )
+        }
+
+        // Geocoding progress dialog
+        if (isGeocoding) {
+            AlertDialog(
+                onDismissRequest = { },
+                title = { Text("Getting Address") },
+                text = {
+                    Column {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Looking up address for your location...")
+                    }
+                },
+                confirmButton = { }
             )
         }
 
@@ -164,7 +234,24 @@ fun HomeScreen() {
                     mapView?.controller?.setCenter(geo)
                     mapView?.controller?.setZoom(17.0)
                     currentGeoPoint = geo
-                    showConfirmDialog = true
+                    
+                    // Start reverse geocoding
+                    isGeocoding = true
+                    scope.launch {
+                        try {
+                            val address = OSMGeocodingUtils.reverseGeocode(geo.latitude, geo.longitude)
+                            geocodedAddress = address
+                            // Pre-fill location name with address if available
+                            locationName = address?.take(50) ?: ""
+                            isGeocoding = false
+                            showNameInputDialog = true
+                        } catch (e: Exception) {
+                            isGeocoding = false
+                            geocodedAddress = "${geo.latitude}, ${geo.longitude}"
+                            showNameInputDialog = true
+                            Toast.makeText(context, "Could not fetch address, using coordinates", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 } else {
                     Toast.makeText(context, "Getting current location...", Toast.LENGTH_SHORT).show()
                     locationOverlay?.enableMyLocation()
