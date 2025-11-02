@@ -3,6 +3,11 @@ package com.bakhawone.thesis_bakhawone.ui.theme
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.drawable.BitmapDrawable
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,7 +19,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.bakhawone.thesis_bakhawone.ARActivity
@@ -57,6 +65,10 @@ fun HomeScreen(
     
     // Store pinned locations to display on map
     val pinnedLocations = remember { mutableStateListOf<PinnedLocation>() }
+    
+    // Dialog state for location tap action
+    var clickedLocation by remember { mutableStateOf<PinnedLocation?>(null) }
+    var showLocationActionDialog by remember { mutableStateOf(false) }
 
     // Initialize session and check permissions on launch
     // Note: DashboardActivity already creates session ID, so we use getSessionId() first
@@ -152,7 +164,11 @@ fun HomeScreen(
             modifier = Modifier.fillMaxSize(),
             update = { view ->
                 // Update markers when pinned locations change
-                updatePinnedLocationMarkers(view, pinnedLocations, onLocationSelected)
+                updatePinnedLocationMarkers(view, pinnedLocations) { location ->
+                    // When marker is clicked, show action dialog
+                    clickedLocation = location
+                    showLocationActionDialog = true
+                }
             }
         )
 
@@ -258,6 +274,64 @@ fun HomeScreen(
                         geocodedAddress = null
                         locationName = ""
                     }) { Text("Cancel") }
+                }
+            )
+        }
+
+        // Location action dialog (Detect Again or View Records)
+        if (showLocationActionDialog && clickedLocation != null) {
+            AlertDialog(
+                onDismissRequest = { 
+                    showLocationActionDialog = false
+                    clickedLocation = null
+                },
+                title = null,
+                text = {
+                    if (clickedLocation!!.address.isNotBlank()) {
+                        Text(
+                            clickedLocation!!.address,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp,
+                            maxLines = 5,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                // Detect Again - Launch AR Activity
+                                val location = clickedLocation!!
+                                val intent = Intent(context, ARActivity::class.java).apply {
+                                    putExtra("deviceStartLat", location.latitude)
+                                    putExtra("deviceStartLon", location.longitude)
+                                    putExtra("locationName", location.name)
+                                }
+                                context.startActivity(intent)
+                                showLocationActionDialog = false
+                                clickedLocation = null
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Detect Again", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = {
+                                // View Records - Navigate to RecordScreen
+                                onLocationSelected?.invoke(clickedLocation!!)
+                                showLocationActionDialog = false
+                                clickedLocation = null
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("View Records", fontSize = 12.sp)
+                        }
+                    }
                 }
             )
         }
@@ -375,12 +449,58 @@ private fun loadPinnedLocations(
 }
 
 /**
+ * Create a red pin icon bitmap similar to Google Maps
+ */
+private fun createRedPinIcon(context: android.content.Context): Bitmap {
+    val size = 100 // Size of the pin icon
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    
+    val paint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.FILL
+    }
+    
+    // Red color for the pin (Google Maps red: #EA4335)
+    val redColor = android.graphics.Color.parseColor("#EA4335")
+    
+    // Draw pin shape: circle on top + teardrop/triangle on bottom
+    val centerX = size / 2f
+    val centerY = size / 2f - 5f // Slightly above center
+    val circleRadius = size * 0.2f
+    
+    // Draw the circle (pin head)
+    paint.color = redColor
+    canvas.drawCircle(centerX, centerY, circleRadius, paint)
+    
+    // Draw the teardrop shape (pin body)
+    val path = Path()
+    val bottomY = size * 0.95f
+    val pinWidth = size * 0.25f
+    
+    path.moveTo(centerX, centerY + circleRadius) // Start from bottom of circle
+    path.lineTo(centerX - pinWidth, bottomY) // Left side of teardrop
+    path.lineTo(centerX, bottomY - 3f) // Bottom point (slightly rounded)
+    path.lineTo(centerX + pinWidth, bottomY) // Right side of teardrop
+    path.close()
+    
+    canvas.drawPath(path, paint)
+    
+    // Add a white circle in the center for the pin highlight
+    paint.color = android.graphics.Color.WHITE
+    val highlightRadius = circleRadius * 0.4f
+    canvas.drawCircle(centerX - circleRadius * 0.3f, centerY - circleRadius * 0.3f, highlightRadius, paint)
+    
+    return bitmap
+}
+
+/**
  * Update markers on map for pinned locations
  */
 private fun updatePinnedLocationMarkers(
     mapView: MapView?,
     pinnedLocations: List<PinnedLocation>,
-    onLocationSelected: ((PinnedLocation) -> Unit)? = null
+    onMarkerClicked: ((PinnedLocation) -> Unit)? = null
 ) {
     if (mapView == null) return
     
@@ -393,6 +513,10 @@ private fun updatePinnedLocationMarkers(
     }
     overlaysToRemove.forEach { mapView.overlays.remove(it) }
     
+    // Create red pin icon once (reuse for all markers)
+    val context = mapView.context
+    val redPinIcon = createRedPinIcon(context)
+    
     // Add markers for each pinned location
     pinnedLocations.forEach { location ->
         val marker = Marker(mapView).apply {
@@ -402,9 +526,12 @@ private fun updatePinnedLocationMarkers(
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
             isDraggable = false
             
-            // Handle marker click to navigate to RecordScreen
+            // Set red pin icon
+            setIcon(android.graphics.drawable.BitmapDrawable(context.resources, redPinIcon))
+            
+            // Handle marker click to show action dialog
             setOnMarkerClickListener { clickedMarker, mapView ->
-                onLocationSelected?.invoke(location)
+                onMarkerClicked?.invoke(location)
                 true // Return true to indicate we handled the click
             }
         }

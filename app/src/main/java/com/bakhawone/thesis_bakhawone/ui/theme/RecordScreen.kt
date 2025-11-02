@@ -158,7 +158,7 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                         "July", "August", "September", "October", "November", "December"
                     )
                     
-                    trunkSnapshot.documents. forEach { doc ->
+                    trunkSnapshot.documents.forEach { doc ->
                         val isAlive = doc.getLong("is_alive") ?: 0L
                         val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
                         
@@ -903,99 +903,106 @@ data class LocationWithStatus(
 fun GISScreen(selectedLocation: PinnedLocation? = null) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
-    val sessionId = remember { SessionManager.getSessionId(context) ?: "" }
     
     var locationsWithStatus by remember { mutableStateOf<List<LocationWithStatus>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     
-    // Load all pinned locations and calculate their alive percentage
-    LaunchedEffect(sessionId) {
-        if (sessionId.isNotEmpty()) {
-            isLoading = true
-            try {
-                // Get all pinned locations
-                val pinnedLocationsSnapshot = db.collection("devices").document(sessionId)
+    // Load all pinned locations from ALL users (global view) and calculate their alive percentage
+    LaunchedEffect(Unit) {
+        isLoading = true
+        try {
+            // Get all devices (sessions) to find all pinned locations
+            val devicesSnapshot = db.collection("devices")
+                .get()
+                .await()
+            
+            val allPinnedLocations = mutableListOf<com.google.firebase.firestore.QueryDocumentSnapshot>()
+            
+            // Collect all pinned_locations from all devices
+            for (deviceDoc in devicesSnapshot.documents) {
+                val pinnedLocationsSnapshot = db.collection("devices").document(deviceDoc.id)
                     .collection("pinned_locations")
                     .get()
                     .await()
+                // Add each document - cast to QueryDocumentSnapshot (QuerySnapshot.documents returns List<QueryDocumentSnapshot>)
+                for (doc in pinnedLocationsSnapshot.documents) {
+                    allPinnedLocations.add(doc as com.google.firebase.firestore.QueryDocumentSnapshot)
+                }
+            }
+            
+            val locations = mutableListOf<LocationWithStatus>()
+            
+            // Process all pinned locations from all users
+            allPinnedLocations.forEach { pinnedDoc ->
+                val location = PinnedLocation(
+                    name = pinnedDoc.getString("name") ?: "Unknown",
+                    address = pinnedDoc.getString("address") ?: "",
+                    latitude = pinnedDoc.getDouble("latitude") ?: 0.0,
+                    longitude = pinnedDoc.getDouble("longitude") ?: 0.0,
+                    timestamp = pinnedDoc.getTimestamp("timestamp")?.toDate()?.time ?: System.currentTimeMillis()
+                )
                 
-                val locations = mutableListOf<LocationWithStatus>()
+                val pinnedLocationDocId = pinnedDoc.id
                 
-                pinnedLocationsSnapshot.documents.forEach { pinnedDoc ->
-                    val location = PinnedLocation(
-                        name = pinnedDoc.getString("name") ?: "Unknown",
-                        address = pinnedDoc.getString("address") ?: "",
-                        latitude = pinnedDoc.getDouble("latitude") ?: 0.0,
-                        longitude = pinnedDoc.getDouble("longitude") ?: 0.0,
-                        timestamp = pinnedDoc.getTimestamp("timestamp")?.toDate()?.time ?: System.currentTimeMillis()
-                    )
+                // Get all trunk detections for this location (from all users)
+                val trunkSnapshot = db.collection("trunk_detections")
+                    .whereEqualTo("pinned_location_id", pinnedLocationDocId)
+                    .whereEqualTo("is_rhizophora", 1)
+                    .get()
+                    .await()
+                
+                if (trunkSnapshot.documents.isNotEmpty()) {
+                    // Find most recent detection month
+                    val monthDataMap = mutableMapOf<String, Pair<Int, Int>>() // monthKey -> (alive, total)
                     
-                    val pinnedLocationDocId = pinnedDoc.id
-                    
-                    // Get all trunk detections for this location
-                    val trunkSnapshot = db.collection("trunk_detections")
-                        .whereEqualTo("pinned_location_id", pinnedLocationDocId)
-                        .whereEqualTo("is_rhizophora", 1)
-                        .get()
-                        .await()
-                    
-                    if (trunkSnapshot.documents.isNotEmpty()) {
-                        // Find most recent detection month
-                        val monthDataMap = mutableMapOf<String, Pair<Int, Int>>() // monthKey -> (alive, total)
-                        val monthNames = arrayOf(
-                            "January", "February", "March", "April", "May", "June",
-                            "July", "August", "September", "October", "November", "December"
-                        )
-                        
-                        trunkSnapshot.documents.forEach { doc ->
-                            val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
-                            if (timestamp != null) {
-                                val calendar = Calendar.getInstance().apply { time = timestamp }
-                                val year = calendar.get(Calendar.YEAR)
-                                val month = calendar.get(Calendar.MONTH)
-                                val monthKey = "$year-${String.format("%02d", month)}"
-                                
-                                val isAlive = doc.getLong("is_alive") ?: 0L
-                                val current = monthDataMap.getOrDefault(monthKey, Pair(0, 0))
-                                monthDataMap[monthKey] = Pair(
-                                    current.first + if (isAlive == 1L) 1 else 0,
-                                    current.second + 1
-                                )
-                            }
-                        }
-                        
-                        // Get most recent month
-                        val mostRecentMonth = monthDataMap.keys.maxOrNull()
-                        if (mostRecentMonth != null) {
-                            val (alive, total) = monthDataMap[mostRecentMonth]!!
-                            val alivePercentage = if (total > 0) (alive.toDouble() / total.toDouble()) * 100.0 else 0.0
+                    trunkSnapshot.documents.forEach { doc ->
+                        val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
+                        if (timestamp != null) {
+                            val calendar = Calendar.getInstance().apply { time = timestamp }
+                            val year = calendar.get(Calendar.YEAR)
+                            val month = calendar.get(Calendar.MONTH)
+                            val monthKey = "$year-${String.format("%02d", month)}"
                             
-                            // Determine circle color based on alive percentage
-                            val circleColor = when {
-                                alivePercentage >= 80.0 -> 0x804CAF50.toInt() // Green (semi-transparent)
-                                alivePercentage >= 51.0 -> 0x8098FB98.toInt() // Light Green
-                                alivePercentage >= 41.0 -> 0x80FFEB3B.toInt() // Yellow
-                                else -> 0x80F44336.toInt() // Red
-                            }
-                            
-                            locations.add(
-                                LocationWithStatus(
-                                    location = location,
-                                    pinnedLocationDocId = pinnedLocationDocId,
-                                    alivePercentage = alivePercentage,
-                                    circleColor = circleColor
-                                )
+                            val isAlive = doc.getLong("is_alive") ?: 0L
+                            val current = monthDataMap.getOrDefault(monthKey, Pair(0, 0))
+                            monthDataMap[monthKey] = Pair(
+                                current.first + if (isAlive == 1L) 1 else 0,
+                                current.second + 1
                             )
                         }
                     }
+                    
+                    // Get most recent month
+                    val mostRecentMonth = monthDataMap.keys.maxOrNull()
+                    if (mostRecentMonth != null) {
+                        val (alive, total) = monthDataMap[mostRecentMonth]!!
+                        val alivePercentage = if (total > 0) (alive.toDouble() / total.toDouble()) * 100.0 else 0.0
+                        
+                        // Determine circle color based on alive percentage
+                        val circleColor = when {
+                            alivePercentage >= 80.0 -> -2130776272 // 0x804CAF50 (Green, semi-transparent)
+                            alivePercentage >= 51.0 -> -2139098504 // 0x8098FB98 (Light Green)
+                            alivePercentage >= 41.0 -> -2130704581 // 0x80FFEB3B (Yellow)
+                            else -> -2130706122 // 0x80F44336 (Red)
+                        }
+                        
+                        locations.add(
+                            LocationWithStatus(
+                                location = location,
+                                pinnedLocationDocId = pinnedLocationDocId,
+                                alivePercentage = alivePercentage,
+                                circleColor = circleColor
+                            )
+                        )
+                    }
                 }
-                
-                locationsWithStatus = locations
-            } catch (e: Exception) {
-                android.util.Log.e("GISScreen", "Error loading location data", e)
-            } finally {
-                isLoading = false
             }
+            
+            locationsWithStatus = locations
+        } catch (e: Exception) {
+            android.util.Log.e("GISScreen", "Error loading location data", e)
+        } finally {
+            isLoading = false
         }
     }
 
