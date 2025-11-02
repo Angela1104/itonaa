@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.Icons.Default
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -39,8 +40,14 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Calendar
@@ -125,6 +132,7 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
     var monthDataList by remember { mutableStateOf<List<MonthData>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var pinnedLocationDocId by remember { mutableStateOf<String?>(null) }
+    var selectedYear by remember { mutableStateOf<Int?>(null) }
     
     // Find pinned_location_id from Firebase and load data grouped by month
     LaunchedEffect(selectedLocation) {
@@ -191,9 +199,15 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                     }
                     
                     // Convert map to sorted list (by year, then month)
-                    monthDataList = monthMap.values.sortedWith(
+                    val allMonths = monthMap.values.sortedWith(
                         compareBy<MonthData> { it.year }.thenBy { it.month }
                     )
+                    monthDataList = allMonths
+                    
+                    // Set default selected year to the most recent year if not set
+                    if (selectedYear == null && allMonths.isNotEmpty()) {
+                        selectedYear = allMonths.maxOfOrNull { it.year }
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("DiagramsScreen", "Error loading trunk data", e)
@@ -207,13 +221,25 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
     }
     
     if (selectedLocation != null) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        // Get available years from monthDataList
+        val availableYears = monthDataList.map { it.year }.distinct().sortedDescending()
+        // Filter monthDataList by selected year
+        val filteredMonthDataList = if (selectedYear != null) {
+            monthDataList.filter { it.year == selectedYear }
+        } else {
+            monthDataList
+        }
+        
+        Box(
+            modifier = Modifier.fillMaxSize()
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.padding(32.dp))
                     Text(
@@ -224,6 +250,111 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                     )
                 } else {
                     if (monthDataList.isNotEmpty()) {
+                        // Location and filter container (above trends card)
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp),
+                            elevation = CardDefaults.cardElevation(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                // Location info on left side (65% of width)
+                                Row(
+                                    modifier = Modifier.weight(0.65f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Start
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.LocationOn,
+                                        contentDescription = "Location",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        selectedLocation!!.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                
+                                // Year filter button on right side (35% of width)
+                                if (availableYears.isNotEmpty()) {
+                                    Box(
+                                        modifier = Modifier.weight(0.35f),
+                                        contentAlignment = Alignment.CenterEnd
+                                    ) {
+                                        var expanded by remember { mutableStateOf(false) }
+                                        
+                                        Button(
+                                            onClick = { expanded = !expanded },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFFA5D6A7) // Matcha green
+                                            ),
+                                            shape = RoundedCornerShape(20.dp),
+                                            modifier = Modifier
+                                                .height(36.dp)
+                                                .width(100.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text(
+                                                    selectedYear?.toString() ?: "All",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color(0xFF1B5E20), // Dark green text
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Icon(
+                                                    imageVector = if (expanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                                    contentDescription = if (expanded) "Collapse" else "Expand",
+                                                    tint = Color(0xFF1B5E20),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                        
+                                        DropdownMenu(
+                                            expanded = expanded,
+                                            onDismissRequest = { expanded = false },
+                                            modifier = Modifier.width(120.dp)
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("All") },
+                                                onClick = {
+                                                    selectedYear = null
+                                                    expanded = false
+                                                }
+                                            )
+                                            availableYears.forEach { year ->
+                                                DropdownMenuItem(
+                                                    text = { Text(year.toString()) },
+                                                    onClick = {
+                                                        selectedYear = year
+                                                        expanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         // Trend Chart - Shows alive and dead counts over time
                         Card(
                             modifier = Modifier
@@ -243,7 +374,7 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                                 
                                 // Trend Line Chart
                                 TrendChart(
-                                    monthDataList = monthDataList,
+                                    monthDataList = filteredMonthDataList,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(300.dp)
@@ -260,26 +391,26 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                                     LegendItem(
                                         color = Color(0xFF4CAF50), // Green
                                         label = "Alive",
-                                        count = monthDataList.sumOf { it.aliveCount }
+                                        count = filteredMonthDataList.sumOf { it.aliveCount }
                                     )
                                     LegendItem(
                                         color = Color(0xFFF44336), // Red
                                         label = "Dead",
-                                        count = monthDataList.sumOf { it.deadCount }
+                                        count = filteredMonthDataList.sumOf { it.deadCount }
                                     )
                                 }
                             }
                         }
                         
-                        // Generate pie chart for each month found in Firebase
-                        monthDataList.forEachIndexed { index, monthData ->
+                        // Generate pie chart for each month found in Firebase (filtered by year)
+                        filteredMonthDataList.forEachIndexed { index, monthData ->
                             val monthTotal = monthData.aliveCount + monthData.deadCount
                             
                             if (monthTotal > 0) {
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(bottom = if (index < monthDataList.size - 1) 16.dp else 24.dp),
+                                        .padding(bottom = if (index < filteredMonthDataList.size - 1) 16.dp else 24.dp),
                                     elevation = CardDefaults.cardElevation(4.dp)
                                 ) {
                                     Column(
@@ -364,15 +495,16 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                             GenerateTrunkDetections.generateTrunkDetectionsInBatches(selectedLocation.name)
                             android.widget.Toast.makeText(
                                 context,
-                                "Generating 100 trunk detections... Check logs for status",
+                                "Generating 400 trunk detections... Check logs for status",
                                 android.widget.Toast.LENGTH_LONG
                             ).show()
                         }
                     ) {
-                        Text("Generate 100 Test Trunks (DEV)")
+                        Text("Generate 400 Test Trunks (DEV)")
                     }
                 }
             }
+        }
     } else {
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -655,6 +787,9 @@ fun ReportsScreen(
     var monthTrunkMap by remember { mutableStateOf<Map<String, List<TrunkReportData>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(false) }
     var pinnedLocationDocId by remember { mutableStateOf<String?>(null) }
+    var expandedMonths by remember { mutableStateOf<Set<String>>(emptySet()) } // Track which months are expanded
+    var lastTapTime by remember { mutableStateOf(0L) }
+    var lastTappedMonth by remember { mutableStateOf<String?>(null) }
     
     // Load trunk data grouped by month
     LaunchedEffect(selectedLocation) {
@@ -730,10 +865,13 @@ fun ReportsScreen(
         }
     }
 
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(16.dp)
     ) {
         if (selectedLocation == null) {
@@ -762,23 +900,69 @@ fun ReportsScreen(
             monthTrunkMap.toSortedMap().forEach { (monthKey, trunks) ->
                 val (year, monthName) = monthKey.split("-")
                 val totalBasalArea = trunks.sumOf { it.basalArea }
+                val isExpanded = expandedMonths.contains(monthKey)
+                val maxDisplay = 5
+                val displayedTrunks = if (isExpanded) trunks else trunks.take(maxDisplay)
+                val hasMore = trunks.size > maxDisplay
                 
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                        .padding(bottom = 24.dp),
-                    elevation = CardDefaults.cardElevation(4.dp)
+                            .padding(bottom = 24.dp)
+                            .clickable {
+                                val currentTime = System.currentTimeMillis()
+                                // Check if this is a double-tap (within 300ms and same month)
+                                if (currentTime - lastTapTime < 300 && lastTappedMonth == monthKey) {
+                                    // Double-tap detected - toggle expanded state
+                                    val wasExpanded = isExpanded
+                                    expandedMonths = if (isExpanded) {
+                                        expandedMonths - monthKey
+                                    } else {
+                                        expandedMonths + monthKey
+                                    }
+                                    lastTapTime = 0
+                                    lastTappedMonth = null
+                                    
+                                    // If collapsing, maintain scroll position to keep this report visible
+                                    if (wasExpanded) {
+                                        scope.launch {
+                                            delay(150) // Wait for UI update
+                                            // Calculate approximate height of removed items
+                                            // Each trunk row is approximately 40-50dp
+                                            val removedTrunks = trunks.size - maxDisplay
+                                            val estimatedHeightReduction = removedTrunks * 45.dp.value
+                                            
+                                            // Get current scroll position
+                                            val currentScroll = scrollState.value.toFloat()
+                                            
+                                            // Adjust scroll to maintain position relative to the card
+                                            // Scroll up by the estimated reduction, but ensure we don't go negative
+                                            val targetScroll = (currentScroll - estimatedHeightReduction).coerceAtLeast(0f)
+                                            
+                                            // Animate scroll to maintain the card's position in view
+                                            scrollState.animateScrollTo(targetScroll.toInt())
+                                        }
+                                    }
+                                } else {
+                                    // Single tap - record for potential double-tap
+                                    lastTapTime = currentTime
+                                    lastTappedMonth = monthKey
+                                }
+                            },
+                        elevation = CardDefaults.cardElevation(4.dp)
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp)
                         ) {
                         // Date
                             Text(
-                            "Date: $monthName $year",
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
-                        
+                                "Date: $monthName $year",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
                         // Divider
                         Divider(
                             modifier = Modifier.padding(vertical = 8.dp)
@@ -825,8 +1009,8 @@ fun ReportsScreen(
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
 
-                        // Table Rows
-                        trunks.forEach { trunk ->
+                        // Table Rows (limited to 5 or all if expanded)
+                        displayedTrunks.forEachIndexed { index, trunk ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -863,7 +1047,7 @@ fun ReportsScreen(
                                 )
                             }
                             
-                            if (trunks.indexOf(trunk) < trunks.size - 1) {
+                            if (index < displayedTrunks.size - 1) {
                                 Divider(
                                     modifier = Modifier.padding(vertical = 4.dp),
                                     thickness = 0.5.dp
@@ -876,18 +1060,66 @@ fun ReportsScreen(
                             modifier = Modifier.padding(vertical = 8.dp)
                             )
 
-                        // Basal Area per Acre
+                        // Basal Area per Acre with Expand/Collapse Icon
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                             Text(
-                            "Basal Area per Acre: ${String.format("%.6f", totalBasalArea)}",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 8.dp)
+                                    "Basal Area per Acre: ${String.format("%.6f", totalBasalArea)}",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                // Expand/Collapse Icon (only show if there are more than 5 trunks)
+                                if (hasMore) {
+                                    IconButton(
+                                        onClick = {
+                                            val wasExpanded = isExpanded
+                                            expandedMonths = if (isExpanded) {
+                                                expandedMonths - monthKey
+                                            } else {
+                                                expandedMonths + monthKey
+                                            }
+                                            
+                                            // If collapsing, maintain scroll position to keep this report visible
+                                            if (wasExpanded) {
+                                                scope.launch {
+                                                    delay(150) // Wait for UI update
+                                                    // Calculate approximate height of removed items
+                                                    // Each trunk row is approximately 40-50dp
+                                                    val removedTrunks = trunks.size - maxDisplay
+                                                    val estimatedHeightReduction = removedTrunks * 45.dp.value
+                                                    
+                                                    // Get current scroll position
+                                                    val currentScroll = scrollState.value.toFloat()
+                                                    
+                                                    // Adjust scroll to maintain position relative to the card
+                                                    // Scroll up by the estimated reduction, but ensure we don't go negative
+                                                    val targetScroll = (currentScroll - estimatedHeightReduction).coerceAtLeast(0f)
+                                                    
+                                                    // Animate scroll to maintain the card's position in view
+                                                    scrollState.animateScrollTo(targetScroll.toInt())
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                            contentDescription = if (isExpanded) "Collapse" else "Expand",
+                                            tint = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
                 }
             }
+        }
+    }
+}
         }
     }
 

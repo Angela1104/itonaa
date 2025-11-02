@@ -15,8 +15,8 @@ import java.util.Calendar
 object GenerateTrunkDetections {
     
     private const val TAG = "GenerateTrunkDetections"
-    private const val SESSION_ID = "session_1957ffce63e84336b5033a5431bf8fd7"
-    private const val PINNED_LOCATION_ID = "2i8JHxopASVJoWSEe6WS"
+    private const val SESSION_ID = "session_7dfa026dd9a046dab8ca9e9bcfc9df5b"
+    private const val PINNED_LOCATION_ID = "6qRQJjs14cGBKYX3dZtm"
     private const val PINNED_LOCATION_NAME = "Mangrove Area 1" // Update this with actual name
     
     private val random = Random()
@@ -101,7 +101,8 @@ object GenerateTrunkDetections {
     
     /**
      * Generate trunk detections in smaller batches to avoid Firebase limits
-     * Generates 200 trunks total: 100 from January, 100 from September
+     * Generates 400 trunks total: 100 from January 2024, 100 from September 2024,
+     * 100 from May 2025, and 100 from June 2025
      * (Firebase batch limit is 500 operations, but we'll use 50 per batch)
      */
     fun generateTrunkDetectionsInBatches(pinnedLocationName: String = PINNED_LOCATION_NAME) {
@@ -112,7 +113,7 @@ object GenerateTrunkDetections {
         
         val batchSize = 50
         val trunksPerMonth = 100
-        val totalTrunks = 200
+        val totalTrunks = 400 // 4 months × 100 trunks each
         var generatedCount = 0
         
         // January 2024 timestamps (random throughout January)
@@ -126,6 +127,33 @@ object GenerateTrunkDetections {
             set(2024, Calendar.SEPTEMBER, 1, 0, 0, 0)
             set(Calendar.MILLISECOND, 0)
         }.time
+        
+        // May 2025 timestamps (random throughout May)
+        val may2025 = Calendar.getInstance().apply {
+            set(2025, Calendar.MAY, 1, 0, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+        
+        // June 2025 timestamps (random throughout June)
+        val june2025 = Calendar.getInstance().apply {
+            set(2025, Calendar.JUNE, 1, 0, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+        
+        fun getDaysInMonth(monthStart: Date): Int {
+            val cal = Calendar.getInstance().apply { time = monthStart }
+            return cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+        }
+        
+        fun getMonthName(monthStart: Date): String {
+            return when (monthStart) {
+                january2024 -> "January 2024"
+                september2024 -> "September 2024"
+                may2025 -> "May 2025"
+                june2025 -> "June 2025"
+                else -> "Unknown"
+            }
+        }
         
         fun createBatch(
             startIndex: Int, 
@@ -151,11 +179,11 @@ object GenerateTrunkDetections {
                     else -> random.nextDouble() * 20.0 + 50.0
                 }
                 
-                // 80% alive, 20% dead (same distribution for both months)
+                // 80% alive, 20% dead
                 val isAlive = if (random.nextDouble() < 0.8) 1 else 0
                 
-                // Generate random timestamp within the month (0 to ~31 days * 24 hours * 3600000 ms)
-                val daysInMonth = if (monthStart == january2024) 31 else 30 // Jan has 31, Sep has 30
+                // Generate random timestamp within the month
+                val daysInMonth = getDaysInMonth(monthStart)
                 val timestampOffset = (random.nextDouble() * daysInMonth * 24 * 3600000).toLong()
                 val detectionTime = Date(monthStart.time + timestampOffset)
                 
@@ -179,7 +207,7 @@ object GenerateTrunkDetections {
             
             batch.commit()
                 .addOnSuccessListener {
-                    val month = if (monthStart == january2024) "January" else "September"
+                    val month = getMonthName(monthStart)
                     Log.d(TAG, "Batch saved: $generatedCount/$totalTrunks trunk detections ($month)")
                     onComplete()
                 }
@@ -188,21 +216,40 @@ object GenerateTrunkDetections {
                 }
         }
         
-        // Generate January batches (100 trunks)
+        // Generate January 2024 batches (100 trunks)
         val janBatch1 = db.batch()
         createBatch(0, batchSize, janBatch1, january2024) {
             val janBatch2 = db.batch()
             createBatch(batchSize, trunksPerMonth, janBatch2, january2024) {
-                // January complete, now generate September batches (100 trunks)
+                // January complete, now generate September 2024 batches (100 trunks)
                 val sepBatch1 = db.batch()
-                createBatch(trunksPerMonth, trunksPerMonth + batchSize, sepBatch1, september2024) {
+                val sepStartIndex = trunksPerMonth
+                createBatch(sepStartIndex, sepStartIndex + batchSize, sepBatch1, september2024) {
                     val sepBatch2 = db.batch()
-                    createBatch(trunksPerMonth + batchSize, totalTrunks, sepBatch2, september2024) {
-                        Log.d(TAG, "✅ Successfully generated all $totalTrunks trunk detections!")
-                        Log.d(TAG, "  - 100 trunks from January 2024")
-                        Log.d(TAG, "  - 100 trunks from September 2024")
-                        Log.d(TAG, "Session ID: $SESSION_ID")
-                        Log.d(TAG, "Pinned Location ID: $PINNED_LOCATION_ID")
+                    createBatch(sepStartIndex + batchSize, sepStartIndex + trunksPerMonth, sepBatch2, september2024) {
+                        // September complete, now generate May 2025 batches (100 trunks)
+                        val mayBatch1 = db.batch()
+                        val mayStartIndex = trunksPerMonth * 2
+                        createBatch(mayStartIndex, mayStartIndex + batchSize, mayBatch1, may2025) {
+                            val mayBatch2 = db.batch()
+                            createBatch(mayStartIndex + batchSize, mayStartIndex + trunksPerMonth, mayBatch2, may2025) {
+                                // May complete, now generate June 2025 batches (100 trunks)
+                                val juneBatch1 = db.batch()
+                                val juneStartIndex = trunksPerMonth * 3
+                                createBatch(juneStartIndex, juneStartIndex + batchSize, juneBatch1, june2025) {
+                                    val juneBatch2 = db.batch()
+                                    createBatch(juneStartIndex + batchSize, juneStartIndex + trunksPerMonth, juneBatch2, june2025) {
+                                        Log.d(TAG, "✅ Successfully generated all $totalTrunks trunk detections!")
+                                        Log.d(TAG, "  - 100 trunks from January 2024")
+                                        Log.d(TAG, "  - 100 trunks from September 2024")
+                                        Log.d(TAG, "  - 100 trunks from May 2025")
+                                        Log.d(TAG, "  - 100 trunks from June 2025")
+                                        Log.d(TAG, "Session ID: $SESSION_ID")
+                                        Log.d(TAG, "Pinned Location ID: $PINNED_LOCATION_ID")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
