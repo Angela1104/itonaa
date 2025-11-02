@@ -19,6 +19,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.bakhawone.thesis_bakhawone.ARActivity
 import com.bakhawone.thesis_bakhawone.OSMGeocodingUtils
+import com.bakhawone.thesis_bakhawone.PinnedLocation
 import com.bakhawone.thesis_bakhawone.SessionManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -29,13 +30,16 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun HomeScreen() {
+fun HomeScreen(
+    onLocationSelected: ((PinnedLocation) -> Unit)? = null
+) {
     val context = LocalContext.current
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
@@ -50,19 +54,50 @@ fun HomeScreen() {
     var locationName by remember { mutableStateOf("") }
     var isGeocoding by remember { mutableStateOf(false) }
     var sessionId by remember { mutableStateOf<String?>(null) }
+    
+    // Store pinned locations to display on map
+    val pinnedLocations = remember { mutableStateListOf<PinnedLocation>() }
 
-    // Get session ID on launch
+    // Initialize session and check permissions on launch
+    // Note: DashboardActivity already creates session ID, so we use getSessionId() first
     LaunchedEffect(Unit) {
-        sessionId = SessionManager.getOrCreateSessionId(context)
+        sessionId = SessionManager.getSessionId(context) ?: SessionManager.getOrCreateSessionId(context)
         
+        // Firebase Auth is needed for Firestore security rules
+        // Check if already signed in to avoid duplicate sign-in attempts
         if (auth.currentUser == null) {
             auth.signInAnonymously()
                 .addOnSuccessListener {
-                    Toast.makeText(context, "Anonymous session started", Toast.LENGTH_SHORT).show()
+                    // Only show toast on first successful sign-in
+                    android.util.Log.d("HomeScreen", "Anonymous Firebase Auth successful")
                 }
-                .addOnFailureListener {
-                    Toast.makeText(context, "Anonymous sign-in failed: ${it.message}", Toast.LENGTH_LONG).show()
+                .addOnFailureListener { e ->
+                    // Only show error toast - success is expected to be silent
+                    Toast.makeText(context, "Authentication failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    android.util.Log.e("HomeScreen", "Anonymous sign-in failed", e)
                 }
+        }
+        
+        // Check initial permission state
+        val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        hasLocationPermission = fineGranted || coarseGranted
+        
+        // Load pinned locations from Firebase to display on map
+        val sId = sessionId ?: SessionManager.getOrCreateSessionId(context)
+        loadPinnedLocations(context, db, sId) { locations ->
+            pinnedLocations.clear()
+            pinnedLocations.addAll(locations)
+        }
+    }
+    
+    // Reload pinned locations when session ID changes or becomes available
+    LaunchedEffect(sessionId) {
+        if (sessionId != null) {
+            loadPinnedLocations(context, db, sessionId!!) { locations ->
+                pinnedLocations.clear()
+                pinnedLocations.addAll(locations)
+            }
         }
     }
 
@@ -79,11 +114,13 @@ fun HomeScreen() {
             Toast.makeText(context, "Location permission denied", Toast.LENGTH_SHORT).show()
         }
     }
-
-    LaunchedEffect(Unit) {
-        val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        hasLocationPermission = fineGranted || coarseGranted
+    
+    // Update location overlay when permission state changes
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission) {
+            locationOverlay?.enableMyLocation()
+            locationOverlay?.enableFollowLocation()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -100,16 +137,23 @@ fun HomeScreen() {
                     controller.setCenter(GeoPoint(9.7439, 118.7357))
 
                     val overlay = MyLocationNewOverlay(GpsMyLocationProvider(ctx), this)
+                    // Location will be enabled when hasLocationPermission state updates
+                    overlays.add(overlay)
+                    locationOverlay = overlay
+                    mapView = this
+                    
+                    // Enable location if permission already granted
                     if (hasLocationPermission) {
                         overlay.enableMyLocation()
                         overlay.enableFollowLocation()
                     }
-                    overlays.add(overlay)
-                    locationOverlay = overlay
-                    mapView = this
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            update = { view ->
+                // Update markers when pinned locations change
+                updatePinnedLocationMarkers(view, pinnedLocations, onLocationSelected)
+            }
         )
 
         // Name input dialog - shown after geocoding is complete
@@ -153,7 +197,8 @@ fun HomeScreen() {
                             val loc = currentGeoPoint!!
                             val name = locationName.trim()
                             val address = geocodedAddress ?: "${loc.latitude}, ${loc.longitude}"
-                            val sId = sessionId ?: SessionManager.getOrCreateSessionId(context)
+                            // Fallback to get session ID if state hasn't updated yet (defensive)
+                            val sId = sessionId ?: SessionManager.getSessionId(context) ?: SessionManager.getOrCreateSessionId(context)
                             
                             // Save pinned location to Firebase under /devices/{session_id}/pinned_locations/
                             val now = Date()
@@ -172,6 +217,16 @@ fun HomeScreen() {
                                 .collection("pinned_locations")
                                 .add(locationData)
                                 .addOnSuccessListener { documentReference ->
+                                    // Add to local list to update map immediately
+                                    val newPinnedLocation = PinnedLocation(
+                                        name = name,
+                                        address = address,
+                                        latitude = loc.latitude,
+                                        longitude = loc.longitude,
+                                        timestamp = System.currentTimeMillis()
+                                    )
+                                    pinnedLocations.add(newPinnedLocation)
+                                    
                                     showNameInputDialog = false
                                     currentGeoPoint = null
                                     geocodedAddress = null
@@ -184,6 +239,7 @@ fun HomeScreen() {
                                         val intent = Intent(it, ARActivity::class.java).apply {
                                             putExtra("deviceStartLat", loc.latitude)
                                             putExtra("deviceStartLon", loc.longitude)
+                                            putExtra("locationName", name) // Pass location name for easier access
                                         }
                                         it.startActivity(intent)
                                     }
@@ -209,7 +265,12 @@ fun HomeScreen() {
         // Geocoding progress dialog
         if (isGeocoding) {
             AlertDialog(
-                onDismissRequest = { },
+                onDismissRequest = { 
+                    // Allow cancellation by stopping geocoding
+                    isGeocoding = false
+                    geocodedAddress = currentGeoPoint?.let { "${it.latitude}, ${it.longitude}" }
+                    showNameInputDialog = true
+                },
                 title = { Text("Getting Address") },
                 text = {
                     Column {
@@ -218,7 +279,16 @@ fun HomeScreen() {
                         Text("Looking up address for your location...")
                     }
                 },
-                confirmButton = { }
+                confirmButton = { },
+                dismissButton = {
+                    TextButton(onClick = {
+                        isGeocoding = false
+                        geocodedAddress = currentGeoPoint?.let { "${it.latitude}, ${it.longitude}" }
+                        showNameInputDialog = true
+                    }) {
+                        Text("Cancel")
+                    }
+                }
             )
         }
 
@@ -264,4 +334,83 @@ fun HomeScreen() {
             Icon(Icons.Filled.MyLocation, contentDescription = "Center on My Location")
         }
     }
+}
+
+/**
+ * Load pinned locations from Firebase and call callback with the list
+ */
+private fun loadPinnedLocations(
+    context: android.content.Context,
+    db: FirebaseFirestore,
+    sessionId: String,
+    callback: (List<PinnedLocation>) -> Unit
+) {
+    db.collection("devices").document(sessionId)
+        .collection("pinned_locations")
+        .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+        .get()
+        .addOnSuccessListener { snapshot ->
+            val locations = snapshot.documents.mapNotNull { doc ->
+                try {
+                    val timestamp = doc.getTimestamp("timestamp")
+                    PinnedLocation(
+                        name = doc.getString("name") ?: "Unknown",
+                        address = doc.getString("address") ?: "",
+                        latitude = doc.getDouble("latitude") ?: 0.0,
+                        longitude = doc.getDouble("longitude") ?: 0.0,
+                        timestamp = timestamp?.toDate()?.time ?: System.currentTimeMillis()
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.e("HomeScreen", "Error parsing pinned location: ${doc.id}", e)
+                    null
+                }
+            }
+            callback(locations)
+            android.util.Log.d("HomeScreen", "Loaded ${locations.size} pinned locations")
+        }
+        .addOnFailureListener { e ->
+            android.util.Log.e("HomeScreen", "Failed to load pinned locations", e)
+            callback(emptyList())
+        }
+}
+
+/**
+ * Update markers on map for pinned locations
+ */
+private fun updatePinnedLocationMarkers(
+    mapView: MapView?,
+    pinnedLocations: List<PinnedLocation>,
+    onLocationSelected: ((PinnedLocation) -> Unit)? = null
+) {
+    if (mapView == null) return
+    
+    // Remove all existing pinned location markers (keep my location overlay)
+    val overlaysToRemove = mutableListOf<org.osmdroid.views.overlay.Overlay>()
+    mapView.overlays.forEach { overlay ->
+        if (overlay is Marker && overlay.title?.startsWith("📍 ") == true) {
+            overlaysToRemove.add(overlay)
+        }
+    }
+    overlaysToRemove.forEach { mapView.overlays.remove(it) }
+    
+    // Add markers for each pinned location
+    pinnedLocations.forEach { location ->
+        val marker = Marker(mapView).apply {
+            position = GeoPoint(location.latitude, location.longitude)
+            title = "📍 ${location.name}"
+            snippet = if (location.address.isNotBlank()) location.address else "${location.latitude}, ${location.longitude}"
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            isDraggable = false
+            
+            // Handle marker click to navigate to RecordScreen
+            setOnMarkerClickListener { clickedMarker, mapView ->
+                onLocationSelected?.invoke(location)
+                true // Return true to indicate we handled the click
+            }
+        }
+        mapView.overlays.add(marker)
+    }
+    
+    // Refresh map to show markers
+    mapView.invalidate()
 }

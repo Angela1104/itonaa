@@ -116,6 +116,36 @@ class DashboardActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Update session status to active when app comes to foreground
+        updateSessionStatus("active")
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Update session status when app goes to background
+        updateSessionStatus("background")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Mark session as inactive when app is destroyed
+        updateSessionStatus("inactive")
+    }
+
+    private fun updateSessionStatus(status: String) {
+        val sessionId = SessionManager.getSessionId(applicationContext)
+        if (sessionId != null) {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("devices").document(sessionId)
+                .update("status", status)
+                .addOnFailureListener { e ->
+                    android.util.Log.e("DashboardActivity", "Failed to update session status to $status", e)
+                }
+        }
+    }
+
     private fun initializeSession() {
         val sessionId = SessionManager.getOrCreateSessionId(applicationContext)
         val db = FirebaseFirestore.getInstance()
@@ -144,11 +174,17 @@ class DashboardActivity : ComponentActivity() {
                     // Session exists, update status to active
                     db.collection("devices").document(sessionId)
                         .update("status", "active")
+                        .addOnSuccessListener {
+                            android.util.Log.d("DashboardActivity", "Session status updated to active: $sessionId")
+                        }
+                        .addOnFailureListener { e ->
+                            android.util.Log.e("DashboardActivity", "Failed to update session status", e)
+                        }
                 }
             }
             .addOnFailureListener { e ->
                 android.util.Log.e("DashboardActivity", "Failed to check session", e)
-                // Try to create anyway
+                // Try to create anyway, but use merge to avoid overwriting existing data
                 val sessionData = hashMapOf(
                     "start_time" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                         timeZone = TimeZone.getTimeZone("UTC")
@@ -156,7 +192,13 @@ class DashboardActivity : ComponentActivity() {
                     "status" to "active"
                 )
                 db.collection("devices").document(sessionId)
-                    .set(sessionData)
+                    .set(sessionData, com.google.firebase.firestore.SetOptions.merge())
+                    .addOnSuccessListener {
+                        android.util.Log.d("DashboardActivity", "Session created (fallback): $sessionId")
+                    }
+                    .addOnFailureListener { createError ->
+                        android.util.Log.e("DashboardActivity", "Failed to create session (fallback)", createError)
+                    }
             }
     }
 }
@@ -166,6 +208,7 @@ class DashboardActivity : ComponentActivity() {
 fun DashboardApp() {
     var selectedIndex by remember { mutableIntStateOf(0) }
     var selectedRecordTab by remember { mutableIntStateOf(0) }
+    var selectedLocation by remember { mutableStateOf<PinnedLocation?>(null) }
 
     // Store pinned locations at the top level - this will be shared across all screens
     val pinnedLocations = remember { mutableStateListOf<PinnedLocation>() }
@@ -236,8 +279,20 @@ fun DashboardApp() {
                 label = "ScreenTransition"
             ) { screenIndex ->
                 when (screenIndex) {
-                    0 -> HomeScreen()
-                    1 -> RecordScreen(selectedRecordTab, pinnedLocations) { selectedRecordTab = it }
+                    0 -> HomeScreen(
+                        onLocationSelected = { location ->
+                            selectedLocation = location
+                            selectedRecordTab = 0 // Start with Diagrams tab
+                            selectedIndex = 1 // Navigate to Record screen
+                        }
+                    )
+                    1 -> RecordScreen(
+                        selectedTab = selectedRecordTab,
+                        pinnedLocations = pinnedLocations,
+                        selectedLocation = selectedLocation,
+                        onTabSelected = { selectedRecordTab = it },
+                        onLocationCleared = { selectedLocation = null }
+                    )
                     2 -> PrintScreen()
                     3 -> ProfileScreen()
                 }

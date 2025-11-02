@@ -45,6 +45,9 @@ class ARActivity : ComponentActivity() {
     private var centerpointSet = false
     private var locationManager: LocationManager? = null
     private var pinnedLocationName: String? = null // Store pinned location name for detections
+    private var pinnedLocationDocId: String? = null // Store pinned location document ID for explicit connection
+    private var deviceStartLat: Double = 0.0 // GPS coordinates from HomeScreen
+    private var deviceStartLon: Double = 0.0 // GPS coordinates from HomeScreen
     private val savedDetectionIds = mutableSetOf<String>() // Track saved detections to prevent duplicates
 
     // made non-private so ARRenderer can access them
@@ -58,6 +61,22 @@ class ARActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Initialize session and Firebase Auth early (like HomeScreen does)
+        initializeSessionAndAuth()
+        
+        // Read intent extras from HomeScreen
+        this.deviceStartLat = intent.getDoubleExtra("deviceStartLat", 0.0)
+        this.deviceStartLon = intent.getDoubleExtra("deviceStartLon", 0.0)
+        val locationNameFromIntent = intent.getStringExtra("locationName")
+        
+        // Store location name if provided (avoids Firebase query later)
+        if (locationNameFromIntent != null && locationNameFromIntent.isNotBlank()) {
+            pinnedLocationName = locationNameFromIntent
+            Log.d("ARActivity", "Received location: $locationNameFromIntent at ($deviceStartLat, $deviceStartLon)")
+        } else {
+            Log.d("ARActivity", "Received coordinates: ($deviceStartLat, $deviceStartLon) - no location name")
+        }
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
@@ -67,6 +86,24 @@ class ARActivity : ComponentActivity() {
             )
         } else {
             initARSession()
+        }
+    }
+    
+    private fun initializeSessionAndAuth() {
+        // Initialize session ID (DashboardActivity already creates it, so get first)
+        val sessionId = SessionManager.getSessionId(this) ?: SessionManager.getOrCreateSessionId(this)
+        Log.d("ARActivity", "Session ID: $sessionId")
+        
+        // Firebase Auth is needed for Firestore security rules
+        if (auth.currentUser == null) {
+            auth.signInAnonymously()
+                .addOnSuccessListener {
+                    Log.d("ARActivity", "Anonymous Firebase Auth successful")
+                }
+                .addOnFailureListener { e ->
+                    Log.e("ARActivity", "Anonymous sign-in failed", e)
+                    // Don't show toast here - user is already in AR mode
+                }
         }
     }
 
@@ -310,90 +347,129 @@ class ARActivity : ComponentActivity() {
                 return
             }
 
-            detections.forEach { det ->
-                try {
-                    // Step 1: Species Identification - Determine if Rhizophora
-                    val isRhizo = det.label.contains("Rhizophora", ignoreCase = true)
-                    // Step 2: Status Classification - Alive or Dead
-                    val isDead = det.label.contains("Dead", ignoreCase = true)
-                    val isAlive = det.label.contains("Alive", ignoreCase = true)
-                    
-                    // Calculate screen position for boundary check
-                    val centerXImg = (det.box.left + det.box.right) / 2f
-                    val centerYImg = (det.box.top + det.box.bottom) / 2f
-                    val scaleX = viewW / 640f
-                    val scaleY = viewH / 640f
-                    val screenX = centerXImg * scaleX
-                    val screenY = centerYImg * scaleY
+            if (detections.isEmpty()) return
 
-                    val wp = renderer.worldPointAndDepthFromScreen(screenX, screenY)
-                    if (wp == null) {
-                        // Can't determine position - skip
-                        return@forEach
-                    }
-                    
-                    val localVec = wp.first
-                    val depth = wp.second
-                    
-                    // Validate localVec has 3 elements
-                    if (localVec.size < 3) {
-                        Log.w("ARActivity", "Invalid localVec size: ${localVec.size}")
-                        return@forEach
-                    }
-                    
-                    // Step 3: Boundary Check - Only process Rhizophora inside boundary
-                    val insideBoundary = renderer.isLocalPointInsideBoundary(localVec)
-                    
-                    // Only save Rhizophora trunks that are inside the boundary
-                    if (!isRhizo || !insideBoundary) {
-                        return@forEach
-                    }
+            // Calculate screen center coordinates
+            val screenCenterX = viewW / 2f
+            val screenCenterY = viewH / 2f
 
-                    // Create a unique ID for this detection based on position (to prevent duplicates)
-                    // Round position to ~10cm precision to avoid duplicate saves for same trunk
-                    val posKey = "${String.format("%.2f", localVec[0])}_${String.format("%.2f", localVec[1])}_${String.format("%.2f", localVec[2])}"
-                    if (savedDetectionIds.contains(posKey)) {
-                        // Already saved this detection - skip
-                        return@forEach
-                    }
+            // Find the detection closest to the center of the camera frame
+            val scaleX = viewW / 640f
+            val scaleY = viewH / 640f
+            
+            var closestDetection: Detection? = null
+            var minDistance = Float.MAX_VALUE
 
-                    // Step 4: DBH Measurement (only for alive trunks)
-                    val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
-                    val dbhMeters = if (isAlive) (boxWidthPxOnScreen * depth / fx) else null
-                    val dbhCm = dbhMeters?.let { (it * 100f).coerceIn(0f, 500f) } ?: 0f
+            // Step 1: Find the trunk closest to center
+            for (det in detections) {
+                // Calculate detection center in screen coordinates
+                val centerXImg = (det.box.left + det.box.right) / 2f
+                val centerYImg = (det.box.top + det.box.bottom) / 2f
+                val screenX = centerXImg * scaleX
+                val screenY = centerYImg * scaleY
 
-                    // Step 5: Data Saving - Store in Firebase with proper structure
-                    val trunkId = "trunk_${java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8)}"
-                    val now = Date()
-                    
-                    val data = hashMapOf<String, Any>(
-                        "session_id" to sessionId,
-                        "pinned_location" to (pinnedLocationName ?: "Unknown Location"),
-                        "inside_boundary" to true,
-                        "vector_position" to listOf(localVec[0], localVec[1], localVec[2]),
-                        "is_rhizophora" to 1,
-                        "is_alive" to (if (isAlive) 1 else 0),
-                        "dbh_cm" to dbhCm,
-                        "timestamp" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-                            timeZone = TimeZone.getTimeZone("UTC")
-                        }.format(now),
-                        "timestamp_firestore" to com.google.firebase.Timestamp.now()
-                    )
+                // Calculate distance from detection center to screen center
+                val dx = screenX - screenCenterX
+                val dy = screenY - screenCenterY
+                val distance = kotlin.math.sqrt(dx * dx + dy * dy)
 
-                    // Save to /trunk_detections/ collection
-                    db.collection("trunk_detections")
-                        .document(trunkId)
-                        .set(data)
-                        .addOnSuccessListener {
-                            savedDetectionIds.add(posKey) // Mark as saved
-                            Log.d("ARActivity", "Trunk detection saved: $trunkId")
-                        }
-                        .addOnFailureListener { e ->
-                            Log.e("ARActivity", "Failed to save detection", e)
-                        }
-                } catch (e: Exception) {
-                    Log.e("ARActivity", "Error processing detection", e)
+                // Keep track of closest detection
+                if (distance < minDistance) {
+                    minDistance = distance
+                    closestDetection = det
                 }
+            }
+
+            // Step 2: Process only the closest detection (center of frame)
+            val det = closestDetection ?: return
+            
+            try {
+                // Step 1: Species Identification - Determine if Rhizophora
+                val isRhizo = det.label.contains("Rhizophora", ignoreCase = true)
+                // Step 2: Status Classification - Alive or Dead
+                val isDead = det.label.contains("Dead", ignoreCase = true)
+                val isAlive = det.label.contains("Alive", ignoreCase = true)
+                
+                // Calculate screen position for boundary check (recalculate for processing)
+                val centerXImg = (det.box.left + det.box.right) / 2f
+                val centerYImg = (det.box.top + det.box.bottom) / 2f
+                val screenX = centerXImg * scaleX
+                val screenY = centerYImg * scaleY
+
+                val wp = renderer.worldPointAndDepthFromScreen(screenX, screenY)
+                if (wp == null) {
+                    // Can't determine position - skip
+                    return
+                }
+                
+                val localVec = wp.first
+                val depth = wp.second
+                
+                // Validate localVec has 3 elements
+                if (localVec.size < 3) {
+                    Log.w("ARActivity", "Invalid localVec size: ${localVec.size}")
+                    return
+                }
+                
+                // Step 3: Boundary Check - Only process Rhizophora inside boundary
+                val insideBoundary = renderer.isLocalPointInsideBoundary(localVec)
+                
+                // Only save Rhizophora trunks that are inside the boundary
+                if (!isRhizo || !insideBoundary) {
+                    return
+                }
+
+                // Create a unique ID for this detection based on position (to prevent duplicates)
+                // Round position to ~10cm precision to avoid duplicate saves for same trunk
+                val posKey = "${String.format("%.2f", localVec[0])}_${String.format("%.2f", localVec[1])}_${String.format("%.2f", localVec[2])}"
+                if (savedDetectionIds.contains(posKey)) {
+                    // Already saved this detection - skip
+                    return
+                }
+
+                // Step 4: DBH Measurement (only for alive trunks)
+                val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                val dbhMeters = if (isAlive) (boxWidthPxOnScreen * depth / fx) else null
+                val dbhCm = dbhMeters?.let { (it * 100f).coerceIn(0f, 500f) } ?: 0f
+
+                // Step 5: Data Saving - Store in Firebase with proper structure
+                val trunkId = "trunk_${java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8)}"
+                val now = Date()
+                
+                // Validate centerpoint connection exists before saving
+                if (pinnedLocationDocId == null) {
+                    Log.w("ARActivity", "Cannot save detection: centerpoint document ID not available")
+                    return
+                }
+                
+                val data = hashMapOf<String, Any>(
+                    "session_id" to sessionId,
+                    "pinned_location_id" to pinnedLocationDocId!!, // Explicit connection to centerpoint document
+                    "pinned_location" to (pinnedLocationName ?: "Unknown Location"), // Name for readability
+                    "inside_boundary" to true, // Always true since we filter before saving
+                    "vector_position" to listOf(localVec[0], localVec[1], localVec[2]), // Relative to centerpoint (0,0,0)
+                    "is_rhizophora" to 1,
+                    "is_alive" to (if (isAlive) 1 else 0),
+                    "dbh_cm" to dbhCm,
+                    "timestamp" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }.format(now),
+                    "timestamp_firestore" to com.google.firebase.Timestamp.now()
+                )
+
+                // Save to /trunk_detections/ collection
+                db.collection("trunk_detections")
+                    .document(trunkId)
+                    .set(data)
+                    .addOnSuccessListener {
+                        savedDetectionIds.add(posKey) // Mark as saved
+                        Log.d("ARActivity", "Trunk detection saved (center of frame): $trunkId")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("ARActivity", "Failed to save detection", e)
+                    }
+            } catch (e: Exception) {
+                Log.e("ARActivity", "Error processing detection", e)
             }
         } catch (e: Exception) {
             Log.e("ARActivity", "Error in processAndSaveDetections", e)
@@ -483,6 +559,7 @@ class ARActivity : ComponentActivity() {
                         // Update the most recent pinned location with centerpoint data
                         val pinnedLocationDoc = snapshot.documents[0]
                         pinnedLocationName = pinnedLocationDoc.getString("name") // Store name for detections
+                        pinnedLocationDocId = pinnedLocationDoc.id // Store document ID for explicit connection
                         pinnedLocationDoc.reference
                             .update(centerpointData)
                             .addOnSuccessListener {
@@ -509,8 +586,9 @@ class ARActivity : ComponentActivity() {
                         db.collection("devices").document(sessionId)
                             .collection("pinned_locations")
                             .add(combinedData)
-                            .addOnSuccessListener {
-                                Log.d("ARActivity", "Centerpoint saved as new entry")
+                            .addOnSuccessListener { documentReference ->
+                                pinnedLocationDocId = documentReference.id // Store document ID for explicit connection
+                                Log.d("ARActivity", "Centerpoint saved as new entry: ${documentReference.id}")
                             }
                             .addOnFailureListener { e ->
                                 Log.e("ARActivity", "Failed to save centerpoint", e)
