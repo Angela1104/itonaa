@@ -44,6 +44,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.unit.toSize
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -51,6 +57,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Calendar
+import java.util.TimeZone
 
 @Composable
 fun RecordScreen(
@@ -171,7 +178,7 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                         val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
                         
                         if (timestamp != null) {
-                            val calendar = Calendar.getInstance().apply { time = timestamp }
+                            val calendar = Calendar.getInstance(TimeZone.getTimeZone("GMT+08:00")).apply { time = timestamp }
                             val year = calendar.get(Calendar.YEAR)
                             val month = calendar.get(Calendar.MONTH)
                             
@@ -828,7 +835,7 @@ fun ReportsScreen(
                         val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
                         
                         if (timestamp != null) {
-                            val calendar = Calendar.getInstance().apply { time = timestamp }
+                            val calendar = Calendar.getInstance(TimeZone.getTimeZone("GMT+08:00")).apply { time = timestamp }
                             val year = calendar.get(Calendar.YEAR)
                             val month = calendar.get(Calendar.MONTH)
                             val monthKey = "$year-${monthNames[month]}"
@@ -867,6 +874,8 @@ fun ReportsScreen(
 
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val cardTopPositions = remember { mutableStateMapOf<String, Float>() }
 
     Column(
         modifier = Modifier
@@ -909,12 +918,18 @@ fun ReportsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 24.dp)
+                            .onGloballyPositioned { coords ->
+                                // Track the top Y position of this month card within the scrollable Column
+                                cardTopPositions[monthKey] = coords.positionInParent().y
+                            }
                             .clickable {
                                 val currentTime = System.currentTimeMillis()
                                 // Check if this is a double-tap (within 300ms and same month)
                                 if (currentTime - lastTapTime < 300 && lastTappedMonth == monthKey) {
                                     // Double-tap detected - toggle expanded state
                                     val wasExpanded = isExpanded
+                                    val beforeCardTop = cardTopPositions[monthKey] ?: 0f
+                                    val beforeScroll = scrollState.value.toFloat()
                                     expandedMonths = if (isExpanded) {
                                         expandedMonths - monthKey
                                     } else {
@@ -926,20 +941,10 @@ fun ReportsScreen(
                                     // If collapsing, maintain scroll position to keep this report visible
                                     if (wasExpanded) {
                                         scope.launch {
-                                            delay(150) // Wait for UI update
-                                            // Calculate approximate height of removed items
-                                            // Each trunk row is approximately 40-50dp
-                                            val removedTrunks = trunks.size - maxDisplay
-                                            val estimatedHeightReduction = removedTrunks * 45.dp.value
-                                            
-                                            // Get current scroll position
-                                            val currentScroll = scrollState.value.toFloat()
-                                            
-                                            // Adjust scroll to maintain position relative to the card
-                                            // Scroll up by the estimated reduction, but ensure we don't go negative
-                                            val targetScroll = (currentScroll - estimatedHeightReduction).coerceAtLeast(0f)
-                                            
-                                            // Animate scroll to maintain the card's position in view
+                                            delay(150) // Wait for UI update and layout pass
+                                            val afterCardTop = cardTopPositions[monthKey] ?: beforeCardTop
+                                            val deltaTop = afterCardTop - beforeCardTop
+                                            val targetScroll = (beforeScroll + deltaTop).coerceAtLeast(0f)
                                             scrollState.animateScrollTo(targetScroll.toInt())
                                         }
                                     }
@@ -1080,6 +1085,8 @@ fun ReportsScreen(
                                     IconButton(
                                         onClick = {
                                             val wasExpanded = isExpanded
+                                            val beforeCardTop = cardTopPositions[monthKey] ?: 0f
+                                            val beforeScroll = scrollState.value.toFloat()
                                             expandedMonths = if (isExpanded) {
                                                 expandedMonths - monthKey
                                             } else {
@@ -1089,20 +1096,10 @@ fun ReportsScreen(
                                             // If collapsing, maintain scroll position to keep this report visible
                                             if (wasExpanded) {
                                                 scope.launch {
-                                                    delay(150) // Wait for UI update
-                                                    // Calculate approximate height of removed items
-                                                    // Each trunk row is approximately 40-50dp
-                                                    val removedTrunks = trunks.size - maxDisplay
-                                                    val estimatedHeightReduction = removedTrunks * 45.dp.value
-                                                    
-                                                    // Get current scroll position
-                                                    val currentScroll = scrollState.value.toFloat()
-                                                    
-                                                    // Adjust scroll to maintain position relative to the card
-                                                    // Scroll up by the estimated reduction, but ensure we don't go negative
-                                                    val targetScroll = (currentScroll - estimatedHeightReduction).coerceAtLeast(0f)
-                                                    
-                                                    // Animate scroll to maintain the card's position in view
+                                                    delay(150) // Wait for UI update and layout pass
+                                                    val afterCardTop = cardTopPositions[monthKey] ?: beforeCardTop
+                                                    val deltaTop = afterCardTop - beforeCardTop
+                                                    val targetScroll = (beforeScroll + deltaTop).coerceAtLeast(0f)
                                                     scrollState.animateScrollTo(targetScroll.toInt())
                                                 }
                                             }
@@ -1143,94 +1140,107 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
     LaunchedEffect(Unit) {
         isLoading = true
         try {
-            // Get all devices (sessions) to find all pinned locations
-            val devicesSnapshot = db.collection("devices")
-                .get()
-                .await()
-            
-            val allPinnedLocations = mutableListOf<com.google.firebase.firestore.QueryDocumentSnapshot>()
-            
-            // Collect all pinned_locations from all devices
-            for (deviceDoc in devicesSnapshot.documents) {
-                val pinnedLocationsSnapshot = db.collection("devices").document(deviceDoc.id)
+            val sessionId = SessionManager.getSessionId(context) ?: ""
+            if (sessionId.isNotEmpty()) {
+                // Load only this session's pinned locations
+                val pinnedLocationsSnapshot = db.collection("devices").document(sessionId)
                     .collection("pinned_locations")
                     .get()
                     .await()
-                // Add each document - cast to QueryDocumentSnapshot (QuerySnapshot.documents returns List<QueryDocumentSnapshot>)
-                for (doc in pinnedLocationsSnapshot.documents) {
-                    allPinnedLocations.add(doc as com.google.firebase.firestore.QueryDocumentSnapshot)
-                }
-            }
-            
-            val locations = mutableListOf<LocationWithStatus>()
-            
-            // Process all pinned locations from all users
-            allPinnedLocations.forEach { pinnedDoc ->
-                val location = PinnedLocation(
-                    name = pinnedDoc.getString("name") ?: "Unknown",
-                    address = pinnedDoc.getString("address") ?: "",
-                    latitude = pinnedDoc.getDouble("latitude") ?: 0.0,
-                    longitude = pinnedDoc.getDouble("longitude") ?: 0.0,
-                    timestamp = pinnedDoc.getTimestamp("timestamp")?.toDate()?.time ?: System.currentTimeMillis()
-                )
-                
-                val pinnedLocationDocId = pinnedDoc.id
-                
-                // Get all trunk detections for this location (from all users)
-                val trunkSnapshot = db.collection("trunk_detections")
-                    .whereEqualTo("pinned_location_id", pinnedLocationDocId)
-                    .whereEqualTo("is_rhizophora", 1)
-                    .get()
-                    .await()
-                
-                if (trunkSnapshot.documents.isNotEmpty()) {
-                    // Find most recent detection month
-                    val monthDataMap = mutableMapOf<String, Pair<Int, Int>>() // monthKey -> (alive, total)
-                    
-                    trunkSnapshot.documents.forEach { doc ->
-                        val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
-                        if (timestamp != null) {
-                            val calendar = Calendar.getInstance().apply { time = timestamp }
-                            val year = calendar.get(Calendar.YEAR)
-                            val month = calendar.get(Calendar.MONTH)
-                            val monthKey = "$year-${String.format("%02d", month)}"
-                            
-                            val isAlive = doc.getLong("is_alive") ?: 0L
-                            val current = monthDataMap.getOrDefault(monthKey, Pair(0, 0))
-                            monthDataMap[monthKey] = Pair(
-                                current.first + if (isAlive == 1L) 1 else 0,
-                                current.second + 1
+
+                val locations = mutableListOf<LocationWithStatus>()
+
+                for (pinnedDoc in pinnedLocationsSnapshot.documents) {
+                    val location = PinnedLocation(
+                        name = pinnedDoc.getString("name") ?: "Unknown",
+                        address = pinnedDoc.getString("address") ?: "",
+                        latitude = pinnedDoc.getDouble("latitude") ?: 0.0,
+                        longitude = pinnedDoc.getDouble("longitude") ?: 0.0,
+                        timestamp = pinnedDoc.getTimestamp("timestamp")?.toDate()?.time ?: System.currentTimeMillis()
+                    )
+
+                    val pinnedLocationDocId = pinnedDoc.id
+
+                    // Get all trunk detections for this location (current session's pinned_location_id)
+                    val trunkSnapshot = db.collection("trunk_detections")
+                        .whereEqualTo("pinned_location_id", pinnedLocationDocId)
+                        .whereEqualTo("is_rhizophora", 1)
+                        .get()
+                        .await()
+
+                    if (trunkSnapshot.documents.isNotEmpty()) {
+                        // Track the truly most recent detection timestamp (UTC+8)
+                        var latestTimestampMs = Long.MIN_VALUE
+                        trunkSnapshot.documents.forEach { doc ->
+                            val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
+                            if (timestamp != null) {
+                                val tsMs = timestamp.time
+                                if (tsMs > latestTimestampMs) {
+                                    latestTimestampMs = tsMs
+                                }
+                            }
+                        }
+
+                        if (latestTimestampMs != Long.MIN_VALUE) {
+                            // Compute month window [start, end) in UTC+8 for the latest timestamp
+                            val tz = TimeZone.getTimeZone("GMT+08:00")
+                            val calStart = Calendar.getInstance(tz).apply {
+                                timeInMillis = latestTimestampMs
+                                set(Calendar.DAY_OF_MONTH, 1)
+                                set(Calendar.HOUR_OF_DAY, 0)
+                                set(Calendar.MINUTE, 0)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            val calEnd = Calendar.getInstance(tz).apply {
+                                timeInMillis = calStart.timeInMillis
+                                add(Calendar.MONTH, 1)
+                            }
+
+                            var alive = 0
+                            var total = 0
+                            trunkSnapshot.documents.forEach { doc ->
+                                val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
+                                if (timestamp != null) {
+                                    val tsMs = timestamp.time
+                                    if (tsMs >= calStart.timeInMillis && tsMs < calEnd.timeInMillis) {
+                                        total += 1
+                                        val isAlive = doc.getLong("is_alive") ?: 0L
+                                        if (isAlive == 1L) alive += 1
+                                    }
+                                }
+                            }
+
+                            val alivePercentage = if (total > 0) (alive.toDouble() / total.toDouble()) * 100.0 else 0.0
+
+                            android.util.Log.d(
+                                "GISScreen",
+                                "Location=${location.name} monthWindow=${calStart.get(Calendar.YEAR)}-${String.format("%02d", calStart.get(Calendar.MONTH))} alive=${alive} total=${total} pct=${String.format("%.2f", alivePercentage)}"
+                            )
+
+                            val circleColor = when {
+                                alivePercentage >= 80.0 -> -2130776272 // 0x804CAF50 (Green, semi-transparent)
+                                alivePercentage >= 51.0 -> -2139098504 // 0x8098FB98 (Light Green)
+                                alivePercentage >= 41.0 -> -2130704581 // 0x80FFEB3B (Yellow)
+                                else -> -2130706122 // 0x80F44336 (Red)
+                            }
+
+                            locations.add(
+                                LocationWithStatus(
+                                    location = location,
+                                    pinnedLocationDocId = pinnedLocationDocId,
+                                    alivePercentage = alivePercentage,
+                                    circleColor = circleColor
+                                )
                             )
                         }
                     }
-                    
-                    // Get most recent month
-                    val mostRecentMonth = monthDataMap.keys.maxOrNull()
-                    if (mostRecentMonth != null) {
-                        val (alive, total) = monthDataMap[mostRecentMonth]!!
-                        val alivePercentage = if (total > 0) (alive.toDouble() / total.toDouble()) * 100.0 else 0.0
-                        
-                        // Determine circle color based on alive percentage
-                        val circleColor = when {
-                            alivePercentage >= 80.0 -> -2130776272 // 0x804CAF50 (Green, semi-transparent)
-                            alivePercentage >= 51.0 -> -2139098504 // 0x8098FB98 (Light Green)
-                            alivePercentage >= 41.0 -> -2130704581 // 0x80FFEB3B (Yellow)
-                            else -> -2130706122 // 0x80F44336 (Red)
-                        }
-                        
-                        locations.add(
-                            LocationWithStatus(
-                                location = location,
-                                pinnedLocationDocId = pinnedLocationDocId,
-                                alivePercentage = alivePercentage,
-                                circleColor = circleColor
-                            )
-                        )
-                    }
                 }
+
+                locationsWithStatus = locations
+            } else {
+                locationsWithStatus = emptyList()
             }
-            
-            locationsWithStatus = locations
         } catch (e: Exception) {
             android.util.Log.e("GISScreen", "Error loading location data", e)
         } finally {

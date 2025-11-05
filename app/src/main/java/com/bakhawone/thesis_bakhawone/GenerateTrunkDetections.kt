@@ -15,8 +15,8 @@ import java.util.Calendar
 object GenerateTrunkDetections {
     
     private const val TAG = "GenerateTrunkDetections"
-    private const val SESSION_ID = "session_7dfa026dd9a046dab8ca9e9bcfc9df5b"
-    private const val PINNED_LOCATION_ID = "6qRQJjs14cGBKYX3dZtm"
+    private const val SESSION_ID = "session_c8a51a15dc00440dba7e74f64c970794"
+    private const val PINNED_LOCATION_ID = "WY7ZXSplsgPslKsToM1V"
     private const val PINNED_LOCATION_NAME = "Mangrove Area 1" // Update this with actual name
     
     private val random = Random()
