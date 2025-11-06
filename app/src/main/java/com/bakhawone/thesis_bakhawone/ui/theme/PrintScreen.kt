@@ -15,7 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
-import com.bakhawone.thesis_bakhawone.SessionManager
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
@@ -51,13 +51,15 @@ data class TrunkPrintData(
 fun PrintScreen() {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
-    val sessionId = remember { SessionManager.getSessionId(context) ?: "" }
+    val userId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
     
     var selectedYear by remember { mutableStateOf<Int?>(null) }
     var expanded by remember { mutableStateOf(false) }
     var locationDataList by remember { mutableStateOf<List<LocationPrintData>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
+    var isLoadingInitial by remember { mutableStateOf(true) }
     var availableYears by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var hasData by remember { mutableStateOf(false) }
     
     val dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
     val monthNames = arrayOf(
@@ -67,30 +69,46 @@ fun PrintScreen() {
     
     // Load available years on initial load and set most recent year
     LaunchedEffect(Unit) {
-        if (sessionId.isNotEmpty()) {
+        if (userId.isNotEmpty()) {
+            isLoadingInitial = true
             try {
                 val trunkSnapshot = db.collection("trunk_detections")
+                    .whereEqualTo("user_id", userId)
                     .whereEqualTo("is_rhizophora", 1)
                     .get()
                     .await()
                 
-                val yearsSet = mutableSetOf<Int>()
-                trunkSnapshot.documents.forEach { doc ->
-                    val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
-                    if (timestamp != null) {
-                        val calendar = Calendar.getInstance().apply { time = timestamp }
-                        yearsSet.add(calendar.get(Calendar.YEAR))
+                if (trunkSnapshot.documents.isEmpty()) {
+                    // No data found
+                    hasData = false
+                    availableYears = emptyList()
+                } else {
+                    // Data found, extract years
+                    hasData = true
+                    val yearsSet = mutableSetOf<Int>()
+                    trunkSnapshot.documents.forEach { doc ->
+                        val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
+                        if (timestamp != null) {
+                            val calendar = Calendar.getInstance().apply { time = timestamp }
+                            yearsSet.add(calendar.get(Calendar.YEAR))
+                        }
                     }
-                }
-                availableYears = yearsSet.sortedDescending()
-                
-                // Set the most recent year as default
-                if (availableYears.isNotEmpty() && selectedYear == null) {
-                    selectedYear = availableYears[0]
+                    availableYears = yearsSet.sortedDescending()
+                    
+                    // Set the most recent year as default
+                    if (availableYears.isNotEmpty() && selectedYear == null) {
+                        selectedYear = availableYears[0]
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("PrintScreen", "Error loading years", e)
+                hasData = false
+            } finally {
+                isLoadingInitial = false
             }
+        } else {
+            isLoadingInitial = false
+            hasData = false
         }
     }
     
@@ -99,8 +117,9 @@ fun PrintScreen() {
         if (selectedYear != null) {
             isLoading = true
             try {
-                // Get all trunk detections for the selected year
+                // Get all trunk detections for the selected year (user-specific only)
                 val trunkSnapshot = db.collection("trunk_detections")
+                    .whereEqualTo("user_id", userId)
                     .whereEqualTo("is_rhizophora", 1)
                     .get()
                     .await()
@@ -255,16 +274,41 @@ fun PrintScreen() {
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 // Content area - Show locations with months and dates
-                if (selectedYear == null) {
+                if (isLoadingInitial) {
                     Box(
                         modifier = Modifier.fillMaxWidth(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "Loading years...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
+                        CircularProgressIndicator()
+                    }
+                } else if (!hasData) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Print,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                            Text(
+                                text = "No data to print",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            Text(
+                                text = "Start detecting trunks in AR to generate print records",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 } else if (isLoading) {
                     Box(

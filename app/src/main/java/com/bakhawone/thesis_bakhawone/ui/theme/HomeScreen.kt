@@ -28,7 +28,7 @@ import androidx.core.content.ContextCompat
 import com.bakhawone.thesis_bakhawone.ARActivity
 import com.bakhawone.thesis_bakhawone.OSMGeocodingUtils
 import com.bakhawone.thesis_bakhawone.PinnedLocation
-import com.bakhawone.thesis_bakhawone.SessionManager
+// SessionManager removed: switch to user-based storage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.Timestamp
@@ -61,7 +61,7 @@ fun HomeScreen(
     var geocodedAddress by remember { mutableStateOf<String?>(null) }
     var locationName by remember { mutableStateOf("") }
     var isGeocoding by remember { mutableStateOf(false) }
-    var sessionId by remember { mutableStateOf<String?>(null) }
+    var userId by remember { mutableStateOf<String?>(null) }
     
     // Store pinned locations to display on map
     val pinnedLocations = remember { mutableStateListOf<PinnedLocation>() }
@@ -70,24 +70,11 @@ fun HomeScreen(
     var clickedLocation by remember { mutableStateOf<PinnedLocation?>(null) }
     var showLocationActionDialog by remember { mutableStateOf(false) }
 
-    // Initialize session and check permissions on launch
-    // Note: DashboardActivity already creates session ID, so we use getSessionId() first
+    // Initialize user and check permissions on launch
     LaunchedEffect(Unit) {
-        sessionId = SessionManager.getSessionId(context) ?: SessionManager.getOrCreateSessionId(context)
-        
-        // Firebase Auth is needed for Firestore security rules
-        // Check if already signed in to avoid duplicate sign-in attempts
-        if (auth.currentUser == null) {
-            auth.signInAnonymously()
-                .addOnSuccessListener {
-                    // Only show toast on first successful sign-in
-                    android.util.Log.d("HomeScreen", "Anonymous Firebase Auth successful")
-                }
-                .addOnFailureListener { e ->
-                    // Only show error toast - success is expected to be silent
-                    Toast.makeText(context, "Authentication failed: ${e.message}", Toast.LENGTH_LONG).show()
-                    android.util.Log.e("HomeScreen", "Anonymous sign-in failed", e)
-                }
+        userId = auth.currentUser?.uid
+        if (userId == null) {
+            Toast.makeText(context, "Please sign in to continue", Toast.LENGTH_LONG).show()
         }
         
         // Check initial permission state
@@ -96,17 +83,19 @@ fun HomeScreen(
         hasLocationPermission = fineGranted || coarseGranted
         
         // Load pinned locations from Firebase to display on map
-        val sId = sessionId ?: SessionManager.getOrCreateSessionId(context)
-        loadPinnedLocations(context, db, sId) { locations ->
-            pinnedLocations.clear()
-            pinnedLocations.addAll(locations)
+        val uid = userId
+        if (uid != null) {
+            loadPinnedLocations(context, db, uid) { locations ->
+                pinnedLocations.clear()
+                pinnedLocations.addAll(locations)
+            }
         }
     }
     
-    // Reload pinned locations when session ID changes or becomes available
-    LaunchedEffect(sessionId) {
-        if (sessionId != null) {
-            loadPinnedLocations(context, db, sessionId!!) { locations ->
+    // Reload pinned locations when user ID changes or becomes available
+    LaunchedEffect(userId) {
+        if (userId != null) {
+            loadPinnedLocations(context, db, userId!!) { locations ->
                 pinnedLocations.clear()
                 pinnedLocations.addAll(locations)
             }
@@ -213,10 +202,13 @@ fun HomeScreen(
                             val loc = currentGeoPoint!!
                             val name = locationName.trim()
                             val address = geocodedAddress ?: "${loc.latitude}, ${loc.longitude}"
-                            // Fallback to get session ID if state hasn't updated yet (defensive)
-                            val sId = sessionId ?: SessionManager.getSessionId(context) ?: SessionManager.getOrCreateSessionId(context)
-                            
-                            // Save pinned location to Firebase under /devices/{session_id}/pinned_locations/
+                            // Determine current user ID
+                            val uid = userId ?: auth.currentUser?.uid
+                            if (uid == null) {
+                                Toast.makeText(context, "Please sign in to save locations", Toast.LENGTH_LONG).show()
+                                return@Button
+                            }
+                            // Save pinned location to Firebase under /users/{uid}/pinned_locations/
                             val now = Date()
                             val locationData = hashMapOf(
                                 "name" to name,
@@ -229,7 +221,7 @@ fun HomeScreen(
                                 }.format(now) // ISO string for human readability
                             )
                             
-                            db.collection("devices").document(sId)
+                            db.collection("users").document(uid)
                                 .collection("pinned_locations")
                                 .add(locationData)
                                 .addOnSuccessListener { documentReference ->
@@ -261,7 +253,8 @@ fun HomeScreen(
                                     }
                                 }
                                 .addOnFailureListener { e ->
-                                    Toast.makeText(context, "Failed to save location: ${e.message}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Failed to save location. Please try again.", Toast.LENGTH_LONG).show()
+                                    android.util.Log.e("HomeScreen", "Failed to save location", e)
                                 }
                         },
                         enabled = locationName.isNotBlank()
@@ -416,10 +409,10 @@ fun HomeScreen(
 private fun loadPinnedLocations(
     context: android.content.Context,
     db: FirebaseFirestore,
-    sessionId: String,
+    userId: String,
     callback: (List<PinnedLocation>) -> Unit
 ) {
-    db.collection("devices").document(sessionId)
+    db.collection("users").document(userId)
         .collection("pinned_locations")
         .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
         .get()

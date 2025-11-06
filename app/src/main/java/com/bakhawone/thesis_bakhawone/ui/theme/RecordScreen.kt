@@ -24,14 +24,14 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import androidx.compose.ui.viewinterop.AndroidView
 import com.bakhawone.thesis_bakhawone.GeoUtils
 import com.bakhawone.thesis_bakhawone.PinnedLocation
-import com.bakhawone.thesis_bakhawone.GenerateTrunkDetections
-import com.bakhawone.thesis_bakhawone.SessionManager
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.*
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -134,7 +134,7 @@ fun RecordScreen(
 fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
-    val sessionId = remember { SessionManager.getSessionId(context) ?: "" }
+    val userId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
     
     var monthDataList by remember { mutableStateOf<List<MonthData>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
@@ -143,11 +143,11 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
     
     // Find pinned_location_id from Firebase and load data grouped by month
     LaunchedEffect(selectedLocation) {
-        if (selectedLocation != null && sessionId.isNotEmpty()) {
+        if (selectedLocation != null && userId.isNotEmpty()) {
             isLoading = true
             try {
                 // Query to find the pinned location document ID
-                val snapshot = db.collection("devices").document(sessionId)
+                val snapshot = db.collection("users").document(userId)
                     .collection("pinned_locations")
                     .whereEqualTo("name", selectedLocation.name)
                     .whereEqualTo("latitude", selectedLocation.latitude)
@@ -477,37 +477,26 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                             }
                         }
                     } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(32.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                "No trunk detections found",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            )
-                            Text(
-                                "Start detection in AR to generate data",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    "No trunk detections found",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.padding(bottom = 16.dp)
+                                )
+                                Text(
+                                    "Start detection in AR to generate data",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
                         }
-                    }
-                    
-                    // Temporary button to generate test data (remove in production)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = {
-                            GenerateTrunkDetections.generateTrunkDetectionsInBatches(selectedLocation.name)
-                            android.widget.Toast.makeText(
-                                context,
-                                "Generating 400 trunk detections... Check logs for status",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    ) {
-                        Text("Generate 400 Test Trunks (DEV)")
                     }
                 }
             }
@@ -517,7 +506,7 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-            Text("Select a location from the map to view diagrams")
+            Text("Select a location from the map to view records")
         }
     }
 }
@@ -789,7 +778,15 @@ fun ReportsScreen(
 ) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
-    val sessionId = remember { SessionManager.getSessionId(context) ?: "" }
+    val userId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
+    
+    // Month names helper to map to indices
+    val monthNames = remember {
+        arrayOf(
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        )
+    }
     
     var monthTrunkMap by remember { mutableStateOf<Map<String, List<TrunkReportData>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(false) }
@@ -800,11 +797,11 @@ fun ReportsScreen(
     
     // Load trunk data grouped by month
     LaunchedEffect(selectedLocation) {
-        if (selectedLocation != null && sessionId.isNotEmpty()) {
+        if (selectedLocation != null && userId.isNotEmpty()) {
             isLoading = true
             try {
                 // Query to find the pinned location document ID
-                val snapshot = db.collection("devices").document(sessionId)
+                val snapshot = db.collection("users").document(userId)
                     .collection("pinned_locations")
                     .whereEqualTo("name", selectedLocation.name)
                     .whereEqualTo("latitude", selectedLocation.latitude)
@@ -823,12 +820,7 @@ fun ReportsScreen(
                         .get()
                         .await()
                     
-                    val monthNames = arrayOf(
-                        "January", "February", "March", "April", "May", "June",
-                        "July", "August", "September", "October", "November", "December"
-                    )
-                    
-                    // Group trunks by month
+                    // Group trunk detections by month
                     val map = mutableMapOf<String, MutableList<TrunkReportData>>()
                     
                     trunkSnapshot.documents.forEach { doc ->
@@ -877,208 +869,226 @@ fun ReportsScreen(
     val density = LocalDensity.current
     val cardTopPositions = remember { mutableStateMapOf<String, Float>() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp)
-    ) {
-        if (selectedLocation == null) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Select a location from the map to view reports")
+    if (selectedLocation == null) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Select a location from the map to view records")
+        }
+    } else if (isLoading) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                Text(
+                    "Loading reports...",
+                    color = MaterialTheme.colorScheme.secondary
+                )
             }
-        } else if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally).padding(32.dp))
-        Text(
-                "Loading reports...",
-                modifier = Modifier.align(Alignment.CenterHorizontally).padding(16.dp),
-                color = MaterialTheme.colorScheme.secondary
-            )
-        } else if (monthTrunkMap.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No trunk detections found for this location")
-            }
-        } else {
+        }
+    } else if (monthTrunkMap.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No trunk detections found for this location")
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(16.dp)
+        ) {
             // Display report for each month
-            monthTrunkMap.toSortedMap().forEach { (monthKey, trunks) ->
-                val (year, monthName) = monthKey.split("-")
-                val totalBasalArea = trunks.sumOf { it.basalArea }
-                val isExpanded = expandedMonths.contains(monthKey)
-                val maxDisplay = 5
-                val displayedTrunks = if (isExpanded) trunks else trunks.take(maxDisplay)
-                val hasMore = trunks.size > maxDisplay
-                
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 24.dp)
-                            .onGloballyPositioned { coords ->
-                                // Track the top Y position of this month card within the scrollable Column
-                                cardTopPositions[monthKey] = coords.positionInParent().y
-                            }
-                            .clickable {
-                                val currentTime = System.currentTimeMillis()
-                                // Check if this is a double-tap (within 300ms and same month)
-                                if (currentTime - lastTapTime < 300 && lastTappedMonth == monthKey) {
-                                    // Double-tap detected - toggle expanded state
-                                    val wasExpanded = isExpanded
-                                    val beforeCardTop = cardTopPositions[monthKey] ?: 0f
-                                    val beforeScroll = scrollState.value.toFloat()
-                                    expandedMonths = if (isExpanded) {
-                                        expandedMonths - monthKey
-                                    } else {
-                                        expandedMonths + monthKey
-                                    }
-                                    lastTapTime = 0
-                                    lastTappedMonth = null
-                                    
-                                    // If collapsing, maintain scroll position to keep this report visible
-                                    if (wasExpanded) {
-                                        scope.launch {
-                                            delay(150) // Wait for UI update and layout pass
-                                            val afterCardTop = cardTopPositions[monthKey] ?: beforeCardTop
-                                            val deltaTop = afterCardTop - beforeCardTop
-                                            val targetScroll = (beforeScroll + deltaTop).coerceAtLeast(0f)
-                                            scrollState.animateScrollTo(targetScroll.toInt())
-                                        }
-                                    }
-                                } else {
-                                    // Single tap - record for potential double-tap
-                                    lastTapTime = currentTime
-                                    lastTappedMonth = monthKey
-                                }
-                            },
-                        elevation = CardDefaults.cardElevation(4.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp)
-                        ) {
-                        // Date
-                            Text(
-                                "Date: $monthName $year",
-                                style = MaterialTheme.typography.titleLarge,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            
-                        // Divider
-                        Divider(
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                        
-                        // Table Header
-                        Row(
+            run {
+                val sortedEntries = monthTrunkMap.entries.sortedWith(
+                    compareByDescending<Map.Entry<String, List<TrunkReportData>>> {
+                        val parts = it.key.split("-")
+                        val yr = parts.getOrNull(0)?.toIntOrNull() ?: 0
+                        val mName = parts.getOrNull(1) ?: ""
+                        val mIdx = monthNames.indexOf(mName).coerceAtLeast(0)
+                        yr * 100 + mIdx
+                    }
+                )
+                sortedEntries.forEach { (monthKey, trunks) ->
+                    val (year, monthName) = monthKey.split("-")
+                    val totalBasalArea = trunks.sumOf { it.basalArea }
+                    val isExpanded = expandedMonths.contains(monthKey)
+                    val maxDisplay = 5
+                    val displayedTrunks = if (isExpanded) trunks else trunks.take(maxDisplay)
+                    val hasMore = trunks.size > maxDisplay
+                    
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(bottom = 24.dp)
+                                .onGloballyPositioned { coords ->
+                                    // Track the top Y position of this month card within the scrollable Column
+                                    cardTopPositions[monthKey] = coords.positionInParent().y
+                                }
+                                .clickable {
+                                    val currentTime = System.currentTimeMillis()
+                                    // Check if this is a double-tap (within 300ms and same month)
+                                    if (currentTime - lastTapTime < 300 && lastTappedMonth == monthKey) {
+                                        // Double-tap detected - toggle expanded state
+                                        val wasExpanded = isExpanded
+                                        val beforeCardTop = cardTopPositions[monthKey] ?: 0f
+                                        val beforeScroll = scrollState.value.toFloat()
+                                        expandedMonths = if (isExpanded) {
+                                            expandedMonths - monthKey
+                                        } else {
+                                            expandedMonths + monthKey
+                                        }
+                                        lastTapTime = 0
+                                        lastTappedMonth = null
+                                        
+                                        // If collapsing, maintain scroll position to keep this report visible
+                                        if (wasExpanded) {
+                                            scope.launch {
+                                                delay(150) // Wait for UI update and layout pass
+                                                val afterCardTop = cardTopPositions[monthKey] ?: beforeCardTop
+                                                val deltaTop = afterCardTop - beforeCardTop
+                                                val targetScroll = (beforeScroll + deltaTop).coerceAtLeast(0f)
+                                                scrollState.animateScrollTo(targetScroll.toInt())
+                                            }
+                                        }
+                                    } else {
+                                        // Single tap - record for potential double-tap
+                                        lastTapTime = currentTime
+                                        lastTappedMonth = monthKey
+                                    }
+                                },
+                            elevation = CardDefaults.cardElevation(4.dp)
                         ) {
-                            Text(
-                                "Trunk ID",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                "Status",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.Center
-                            )
-                            Text(
-                                "DBH(cm)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.End
-                            )
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                            // Date
                                 Text(
-                                "Basal Area(m²)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.End
-                            )
-                        }
-                        
-                        // Divider
-                        Divider(
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
+                                    "Date: $monthName $year",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
 
-                        // Table Rows (limited to 5 or all if expanded)
-                        displayedTrunks.forEachIndexed { index, trunk ->
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                            // Divider
+                            Divider(
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                            
+                            // Table Header
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Start
                             ) {
                                 Text(
-                                    trunk.trunkId.take(12), // Show first 12 chars of ID
-                                    style = MaterialTheme.typography.bodySmall,
+                                    "Trunk ID",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
                                     modifier = Modifier.weight(1f),
-                                    fontSize = 12.sp
+                                    textAlign = TextAlign.Start
                                 )
                                 Text(
-                                    trunk.status,
-                                    style = MaterialTheme.typography.bodySmall,
+                                    "Status",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
                                     modifier = Modifier.weight(1f),
-                                    textAlign = TextAlign.Center,
-                                    fontSize = 12.sp,
-                                    color = if (trunk.status == "Alive") Color(0xFF4CAF50) else Color(0xFFF44336)
+                                    textAlign = TextAlign.Start
                                 )
                                 Text(
-                                    String.format("%.1f", trunk.dbhCm),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    "DBH(cm)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
                                     modifier = Modifier.weight(1f),
-                                    textAlign = TextAlign.End,
-                                    fontSize = 12.sp
+                                    textAlign = TextAlign.Start
                                 )
-                            Text(
-                                    String.format("%.6f", trunk.basalArea),
-                                    style = MaterialTheme.typography.bodySmall,
+                                Text(
+                                    "Basal Area(m²)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
                                     modifier = Modifier.weight(1f),
-                                    textAlign = TextAlign.End,
-                                    fontSize = 12.sp
+                                    textAlign = TextAlign.Start
                                 )
                             }
                             
-                            if (index < displayedTrunks.size - 1) {
-                                Divider(
-                                    modifier = Modifier.padding(vertical = 4.dp),
-                                    thickness = 0.5.dp
+                            // Divider
+                            Divider(
+                                    modifier = Modifier.padding(bottom = 8.dp)
                                 )
-                            }
-                        }
-                        
-                        // Divider
-                        Divider(
-                            modifier = Modifier.padding(vertical = 8.dp)
-                            )
 
-                        // Basal Area per Acre with Expand/Collapse Icon
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                            Text(
-                                    "Basal Area per Acre: ${String.format("%.6f", totalBasalArea)}",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
+                            // Table Rows (limited to 5 or all if expanded)
+                            displayedTrunks.forEachIndexed { index, trunk ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.Start
+                                ) {
+                                    Text(
+                                        trunk.trunkId.take(12), // Show first 12 chars of ID
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f),
+                                        textAlign = TextAlign.Start,
+                                        fontSize = 12.sp
+                                    )
+                                    Text(
+                                        trunk.status,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f),
+                                        textAlign = TextAlign.Start,
+                                        fontSize = 12.sp,
+                                        color = if (trunk.status == "Alive") Color(0xFF4CAF50) else Color(0xFFF44336)
+                                    )
+                                    Text(
+                                        String.format("%.1f", trunk.dbhCm),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f),
+                                        textAlign = TextAlign.Start,
+                                        fontSize = 12.sp
+                                    )
+                                    Text(
+                                        String.format("%.6f", trunk.basalArea),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f),
+                                        textAlign = TextAlign.Start,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                                
+                                if (index < displayedTrunks.size - 1) {
+                                    Divider(
+                                        modifier = Modifier.padding(vertical = 4.dp),
+                                        thickness = 0.5.dp
+                                    )
+                                }
+                            }
+                            
+                            // Divider
+                            Divider(
+                                modifier = Modifier.padding(vertical = 8.dp)
                                 )
+
+                            // Basal Area per Acre with Expand/Collapse Icon
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                Text(
+                                        "Basal Area per Acre: ${String.format("%.6f", totalBasalArea)}",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                 
                                 // Expand/Collapse Icon (only show if there are more than 5 trunks)
                                 if (hasMore) {
@@ -1109,7 +1119,8 @@ fun ReportsScreen(
                                             imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                             contentDescription = if (isExpanded) "Collapse" else "Expand",
                                             tint = MaterialTheme.colorScheme.primary
-                            )
+                                )
+                            }
                         }
                     }
                 }
@@ -1120,129 +1131,120 @@ fun ReportsScreen(
         }
     }
 
-// Data class for location with alive percentage
+// Data for GIS rendering
 data class LocationWithStatus(
     val location: PinnedLocation,
     val pinnedLocationDocId: String,
-    val alivePercentage: Double, // 0.0 to 100.0
-    val circleColor: Int // Android color integer
+    val alivePercentage: Double,
+    val circleColor: Int
 )
 
 @Composable
 fun GISScreen(selectedLocation: PinnedLocation? = null) {
-    val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
-    
+    val userId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
+
     var locationsWithStatus by remember { mutableStateOf<List<LocationWithStatus>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
-    
-    // Load all pinned locations from ALL users (global view) and calculate their alive percentage
-    LaunchedEffect(Unit) {
+
+    LaunchedEffect(userId) {
+        if (userId.isEmpty()) {
+            locationsWithStatus = emptyList()
+            return@LaunchedEffect
+        }
         isLoading = true
         try {
-            val sessionId = SessionManager.getSessionId(context) ?: ""
-            if (sessionId.isNotEmpty()) {
-                // Load only this session's pinned locations
-                val pinnedLocationsSnapshot = db.collection("devices").document(sessionId)
-                    .collection("pinned_locations")
+            val pinnedLocationsSnapshot = db.collectionGroup("pinned_locations")
+                .get()
+                .await()
+
+            val result = mutableListOf<LocationWithStatus>()
+            for (pinnedDoc in pinnedLocationsSnapshot.documents) {
+                val loc = PinnedLocation(
+                    name = pinnedDoc.getString("name") ?: "Unknown",
+                    address = pinnedDoc.getString("address") ?: "",
+                    latitude = pinnedDoc.getDouble("latitude") ?: 0.0,
+                    longitude = pinnedDoc.getDouble("longitude") ?: 0.0,
+                    timestamp = pinnedDoc.getTimestamp("timestamp")?.toDate()?.time ?: System.currentTimeMillis()
+                )
+                // Skip invalid coordinates
+                if (loc.latitude == 0.0 && loc.longitude == 0.0) continue
+
+                val pinnedLocationDocId = pinnedDoc.id
+
+                // Filter detections for this location and current user
+                val trunks = db.collection("trunk_detections")
+                    .whereEqualTo("pinned_location_id", pinnedLocationDocId)
+                    .whereEqualTo("user_id", userId)
+                    .whereEqualTo("is_rhizophora", 1)
                     .get()
                     .await()
 
-                val locations = mutableListOf<LocationWithStatus>()
+                if (trunks.isEmpty) continue
 
-                for (pinnedDoc in pinnedLocationsSnapshot.documents) {
-                    val location = PinnedLocation(
-                        name = pinnedDoc.getString("name") ?: "Unknown",
-                        address = pinnedDoc.getString("address") ?: "",
-                        latitude = pinnedDoc.getDouble("latitude") ?: 0.0,
-                        longitude = pinnedDoc.getDouble("longitude") ?: 0.0,
-                        timestamp = pinnedDoc.getTimestamp("timestamp")?.toDate()?.time ?: System.currentTimeMillis()
-                    )
+                // Most recent month window (UTC+8)
+                var latestTs = Long.MIN_VALUE
+                trunks.documents.forEach { d ->
+                    val ts = d.getTimestamp("timestamp_firestore")?.toDate()?.time
+                    if (ts != null && ts > latestTs) latestTs = ts
+                }
+                if (latestTs == Long.MIN_VALUE) continue
 
-                    val pinnedLocationDocId = pinnedDoc.id
+                val tz = TimeZone.getTimeZone("GMT+08:00")
+                val calLatest = Calendar.getInstance(tz).apply { timeInMillis = latestTs }
+                val latestYear = calLatest.get(Calendar.YEAR)
+                val latestMonth = calLatest.get(Calendar.MONTH)
 
-                    // Get all trunk detections for this location (current session's pinned_location_id)
-                    val trunkSnapshot = db.collection("trunk_detections")
-                        .whereEqualTo("pinned_location_id", pinnedLocationDocId)
-                        .whereEqualTo("is_rhizophora", 1)
-                        .get()
-                        .await()
+                val calStart = Calendar.getInstance(tz).apply {
+                    set(Calendar.YEAR, latestYear)
+                    set(Calendar.MONTH, latestMonth)
+                    set(Calendar.DAY_OF_MONTH, 1)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val calEnd = Calendar.getInstance(tz).apply {
+                    set(Calendar.YEAR, latestYear)
+                    set(Calendar.MONTH, latestMonth)
+                    set(Calendar.DAY_OF_MONTH, 1)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                    add(Calendar.MONTH, 1)
+                }
 
-                    if (trunkSnapshot.documents.isNotEmpty()) {
-                        // Track the truly most recent detection timestamp (UTC+8)
-                        var latestTimestampMs = Long.MIN_VALUE
-                        trunkSnapshot.documents.forEach { doc ->
-                            val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
-                            if (timestamp != null) {
-                                val tsMs = timestamp.time
-                                if (tsMs > latestTimestampMs) {
-                                    latestTimestampMs = tsMs
-                                }
-                            }
-                        }
-
-                        if (latestTimestampMs != Long.MIN_VALUE) {
-                            // Compute month window [start, end) in UTC+8 for the latest timestamp
-                            val tz = TimeZone.getTimeZone("GMT+08:00")
-                            val calStart = Calendar.getInstance(tz).apply {
-                                timeInMillis = latestTimestampMs
-                                set(Calendar.DAY_OF_MONTH, 1)
-                                set(Calendar.HOUR_OF_DAY, 0)
-                                set(Calendar.MINUTE, 0)
-                                set(Calendar.SECOND, 0)
-                                set(Calendar.MILLISECOND, 0)
-                            }
-                            val calEnd = Calendar.getInstance(tz).apply {
-                                timeInMillis = calStart.timeInMillis
-                                add(Calendar.MONTH, 1)
-                            }
-
-                            var alive = 0
-                            var total = 0
-                            trunkSnapshot.documents.forEach { doc ->
-                                val timestamp = doc.getTimestamp("timestamp_firestore")?.toDate()
-                                if (timestamp != null) {
-                                    val tsMs = timestamp.time
-                                    if (tsMs >= calStart.timeInMillis && tsMs < calEnd.timeInMillis) {
-                                        total += 1
-                                        val isAlive = doc.getLong("is_alive") ?: 0L
-                                        if (isAlive == 1L) alive += 1
-                                    }
-                                }
-                            }
-
-                            val alivePercentage = if (total > 0) (alive.toDouble() / total.toDouble()) * 100.0 else 0.0
-
-                            android.util.Log.d(
-                                "GISScreen",
-                                "Location=${location.name} monthWindow=${calStart.get(Calendar.YEAR)}-${String.format("%02d", calStart.get(Calendar.MONTH))} alive=${alive} total=${total} pct=${String.format("%.2f", alivePercentage)}"
-                            )
-
-                            val circleColor = when {
-                                alivePercentage >= 80.0 -> -2130776272 // 0x804CAF50 (Green, semi-transparent)
-                                alivePercentage >= 51.0 -> -2139098504 // 0x8098FB98 (Light Green)
-                                alivePercentage >= 41.0 -> -2130704581 // 0x80FFEB3B (Yellow)
-                                else -> -2130706122 // 0x80F44336 (Red)
-                            }
-
-                            locations.add(
-                                LocationWithStatus(
-                                    location = location,
-                                    pinnedLocationDocId = pinnedLocationDocId,
-                                    alivePercentage = alivePercentage,
-                                    circleColor = circleColor
-                                )
-                            )
-                        }
+                var alive = 0
+                var total = 0
+                trunks.documents.forEach { d ->
+                    val ts = d.getTimestamp("timestamp_firestore")?.toDate()?.time
+                    if (ts != null && ts >= calStart.timeInMillis && ts < calEnd.timeInMillis) {
+                        total += 1
+                        val isAlive = d.getLong("is_alive") ?: 0L
+                        if (isAlive == 1L) alive += 1
                     }
                 }
 
-                locationsWithStatus = locations
-            } else {
-                locationsWithStatus = emptyList()
+                val pct = if (total > 0) (alive.toDouble() / total.toDouble()) * 100.0 else 0.0
+                val color = when {
+                    pct >= 80.0 -> 0x804CAF50.toInt() // Green
+                    pct >= 51.0 -> 0x8098FB98.toInt() // Pale Green
+                    pct >= 41.0 -> 0x80FFEB3B.toInt() // Yellow
+                    else -> 0x80F44336.toInt()       // Red
+                }
+
+                result.add(
+                    LocationWithStatus(
+                        location = loc,
+                        pinnedLocationDocId = pinnedLocationDocId,
+                        alivePercentage = pct,
+                        circleColor = color
+                    )
+                )
             }
-        } catch (e: Exception) {
-            android.util.Log.e("GISScreen", "Error loading location data", e)
+
+            locationsWithStatus = result
         } finally {
             isLoading = false
         }
@@ -1256,83 +1258,50 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
         AndroidView(
             factory = { ctx ->
                 MapView(ctx).apply {
-                    // Standard OSM setup
                     setTileSource(TileSourceFactory.MAPNIK)
                     setBuiltInZoomControls(true)
                     setMultiTouchControls(true)
-
-                    // Optional: restrict area (Puerto Princesa)
                     val puertoPrincesaBounds = BoundingBox(10.5, 118.85, 9.6, 117.8)
                     setScrollableAreaLimitDouble(puertoPrincesaBounds)
-
-                    // Default center + zoom
                     controller.setZoom(12.0)
                     controller.setCenter(GeoPoint(9.7439, 118.7357))
-
                     clipToOutline = true
                 }
             },
             modifier = Modifier.fillMaxSize(),
             update = { view ->
-                // Remove existing polygons
-                val overlaysToRemove = view.overlays.filter { 
-                    it is org.osmdroid.views.overlay.Polygon
-                }
-                overlaysToRemove.forEach { view.overlays.remove(it) }
-                
-                // Draw circles for each location
-                locationsWithStatus.forEach { locationStatus ->
-                    val center = GeoPoint(locationStatus.location.latitude, locationStatus.location.longitude)
-                    val radius = GeoUtils.calculateRadiusForArea(1000.0) // 1000 sqm
-                    
-                    // Create circle polygon
+                // Clear previous polygons
+                view.overlays.removeAll { it is org.osmdroid.views.overlay.Polygon }
+
+                // Draw circles
+                locationsWithStatus.forEach { ls ->
+                    val center = GeoPoint(ls.location.latitude, ls.location.longitude)
+                    val radius = GeoUtils.calculateRadiusForArea(1000.0)
                     val circle = GeoUtils.createCirclePolygon(center, radius, 36)
-                    circle.fillColor = locationStatus.circleColor
-                    circle.strokeColor = (locationStatus.circleColor and 0x00FFFFFF) or 0xFF000000.toInt() // Opaque border
-                    circle.strokeWidth = 3.0f
-                    circle.title = "${locationStatus.location.name} (${String.format("%.1f", locationStatus.alivePercentage)}% alive)"
-                    
+                    circle.fillColor = ls.circleColor
+                    circle.strokeColor = (ls.circleColor and 0x00FFFFFF) or 0xFF000000.toInt()
+                    circle.strokeWidth = 3f
+                    circle.title = "${ls.location.name} (${String.format("%.1f", ls.alivePercentage)}% alive)"
                     view.overlays.add(circle)
                 }
-                
-                // Center on selected location if available
-                if (selectedLocation != null) {
-                    val locationStatus = locationsWithStatus.find { it.location.name == selectedLocation.name }
-                    if (locationStatus != null) {
+
+                // Center to selected location if provided
+                selectedLocation?.let { sel ->
+                    val match = locationsWithStatus.find { it.location.name == sel.name }
+                    if (match != null) {
                         view.controller.setZoom(17.0)
-                        view.controller.setCenter(GeoPoint(locationStatus.location.latitude, locationStatus.location.longitude))
+                        view.controller.setCenter(GeoPoint(match.location.latitude, match.location.longitude))
                     }
                 }
-                
+
                 view.invalidate()
+            },
+            onRelease = { view ->
+                view.overlays.clear()
             }
         )
-        
-        // Loading indicator
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                contentAlignment = Alignment.TopCenter
-            ) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(end = 8.dp))
-                        Text("Loading locations...")
-                    }
-                }
-            }
-        }
-        
-        // Legend - Horizontal at top
+
+        // Legend
         Card(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -1349,36 +1318,40 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Status:",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                LegendItemHorizontal("≥ 80%", Color(0xFF4CAF50))
-                LegendItemHorizontal("51-79%", Color(0xFF98FB98))
-                LegendItemHorizontal("41-50%", Color(0xFFFFEB3B))
-                LegendItemHorizontal("≤ 40%", Color(0xFFF44336))
+                Text("Status:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                LegendItem("≥ 80%", Color(0xFF4CAF50))
+                LegendItem("51-79%", Color(0xFF98FB98))
+                LegendItem("41-50%", Color(0xFFFFEB3B))
+                LegendItem("≤ 40%", Color(0xFFF44336))
+            }
+        }
+
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Card { Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(end = 8.dp))
+                    Text("Loading locations...")
+                }}
             }
         }
     }
 }
 
 @Composable
-fun LegendItemHorizontal(label: String, color: Color) {
-    Row(
-        modifier = Modifier.padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+private fun LegendItem(label: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
                 .size(16.dp)
                 .background(color, MaterialTheme.shapes.small)
         )
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall,
-            fontSize = 11.sp
-        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.bodySmall)
     }
 }
+

@@ -12,6 +12,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.with
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -19,19 +20,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.bakhawone.thesis_bakhawone.ui.theme.HomeScreen
 import com.bakhawone.thesis_bakhawone.ui.theme.ThesisbakhawoneTheme
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.bakhawone.thesis_bakhawone.ui.theme.PrintScreen
 import com.bakhawone.thesis_bakhawone.ui.theme.ProfileScreen
 import com.bakhawone.thesis_bakhawone.ui.theme.RecordScreen
+import com.bakhawone.thesis_bakhawone.ui.theme.DiagramsScreen
+import com.bakhawone.thesis_bakhawone.ui.theme.ReportsScreen
+import com.bakhawone.thesis_bakhawone.ui.theme.GISScreen
 import org.osmdroid.config.Configuration
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.Polygon
 import kotlin.math.*
-import com.google.firebase.firestore.FirebaseFirestore
-import java.text.SimpleDateFormat
 import java.util.*
 
 // Data model shared at top-level (kept here so Dashboard and other screens can reference)
@@ -103,11 +107,8 @@ class DashboardActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // OSMDroid config (same as original)
+        // OSMDroid config
         Configuration.getInstance().load(applicationContext, getPreferences(MODE_PRIVATE))
-
-        // Initialize anonymous session
-        initializeSession()
 
         setContent {
             ThesisbakhawoneTheme {
@@ -118,88 +119,14 @@ class DashboardActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Update session status to active when app comes to foreground
-        updateSessionStatus("active")
     }
 
     override fun onPause() {
         super.onPause()
-        // Update session status when app goes to background
-        updateSessionStatus("background")
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Mark session as inactive when app is destroyed
-        updateSessionStatus("inactive")
-    }
-
-    private fun updateSessionStatus(status: String) {
-        val sessionId = SessionManager.getSessionId(applicationContext)
-        if (sessionId != null) {
-            val db = FirebaseFirestore.getInstance()
-            db.collection("devices").document(sessionId)
-                .update("status", status)
-                .addOnFailureListener { e ->
-                    android.util.Log.e("DashboardActivity", "Failed to update session status to $status", e)
-                }
-        }
-    }
-
-    private fun initializeSession() {
-        val sessionId = SessionManager.getOrCreateSessionId(applicationContext)
-        val db = FirebaseFirestore.getInstance()
-
-        // Check if session document already exists (in case of app restart)
-        db.collection("devices").document(sessionId)
-            .get()
-            .addOnSuccessListener { document ->
-                if (!document.exists()) {
-                    // Create new session document
-                    val sessionData = hashMapOf(
-                        "start_time" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-                            timeZone = TimeZone.getTimeZone("UTC")
-                        }.format(Date()),
-                        "status" to "active"
-                    )
-                    db.collection("devices").document(sessionId)
-                        .set(sessionData)
-                        .addOnSuccessListener {
-                            android.util.Log.d("DashboardActivity", "Session initialized: $sessionId")
-                        }
-                        .addOnFailureListener { e ->
-                            android.util.Log.e("DashboardActivity", "Failed to initialize session", e)
-                        }
-                } else {
-                    // Session exists, update status to active
-                    db.collection("devices").document(sessionId)
-                        .update("status", "active")
-                        .addOnSuccessListener {
-                            android.util.Log.d("DashboardActivity", "Session status updated to active: $sessionId")
-                        }
-                        .addOnFailureListener { e ->
-                            android.util.Log.e("DashboardActivity", "Failed to update session status", e)
-                        }
-                }
-            }
-            .addOnFailureListener { e ->
-                android.util.Log.e("DashboardActivity", "Failed to check session", e)
-                // Try to create anyway, but use merge to avoid overwriting existing data
-                val sessionData = hashMapOf(
-                    "start_time" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-                        timeZone = TimeZone.getTimeZone("UTC")
-                    }.format(Date()),
-                    "status" to "active"
-                )
-                db.collection("devices").document(sessionId)
-                    .set(sessionData, com.google.firebase.firestore.SetOptions.merge())
-                    .addOnSuccessListener {
-                        android.util.Log.d("DashboardActivity", "Session created (fallback): $sessionId")
-                    }
-                    .addOnFailureListener { createError ->
-                        android.util.Log.e("DashboardActivity", "Failed to create session (fallback)", createError)
-                    }
-            }
     }
 }
 
@@ -209,6 +136,7 @@ fun DashboardApp() {
     var selectedIndex by remember { mutableIntStateOf(0) }
     var selectedRecordTab by remember { mutableIntStateOf(0) }
     var selectedLocation by remember { mutableStateOf<PinnedLocation?>(null) }
+    // mini records panel will expand/collapse instead of navigating or showing popups
 
     // Store pinned locations at the top level - this will be shared across all screens
     val pinnedLocations = remember { mutableStateListOf<PinnedLocation>() }
@@ -282,8 +210,8 @@ fun DashboardApp() {
                     0 -> HomeScreen(
                         onLocationSelected = { location ->
                             selectedLocation = location
-                            selectedRecordTab = 0 // Start with Diagrams tab
-                            selectedIndex = 1 // Navigate to Record screen
+                            selectedRecordTab = 0
+                            selectedIndex = 1
                         }
                     )
                     1 -> RecordScreen(
@@ -299,6 +227,7 @@ fun DashboardApp() {
             }
         }
     }
+
 }
 
 @Composable
@@ -356,3 +285,5 @@ data class BottomNavItem(
     val title: String,
     val icon: ImageVector
 )
+
+// (MiniRecordsContainer removed; using inline MiniRecordsPanel navigation)

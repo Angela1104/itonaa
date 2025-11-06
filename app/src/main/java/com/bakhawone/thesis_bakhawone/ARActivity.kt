@@ -27,7 +27,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.ar.core.*
 import com.google.ar.core.exceptions.*
-import com.bakhawone.thesis_bakhawone.SessionManager
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -90,11 +89,7 @@ class ARActivity : ComponentActivity() {
     }
     
     private fun initializeSessionAndAuth() {
-        // Initialize session ID (DashboardActivity already creates it, so get first)
-        val sessionId = SessionManager.getSessionId(this) ?: SessionManager.getOrCreateSessionId(this)
-        Log.d("ARActivity", "Session ID: $sessionId")
-        
-        // Firebase Auth is needed for Firestore security rules
+        // Ensure Firebase Auth available
         if (auth.currentUser == null) {
             auth.signInAnonymously()
                 .addOnSuccessListener {
@@ -339,7 +334,7 @@ class ARActivity : ComponentActivity() {
             val viewW = glSurfaceView.width.toFloat().takeIf { it > 0 } ?: return
             val viewH = glSurfaceView.height.toFloat().takeIf { it > 0 } ?: return
             val fx = renderer.getFxPixels() ?: return
-            val sessionId = SessionManager.getSessionId(this) ?: SessionManager.getOrCreateSessionId(this)
+            val userId = auth.currentUser?.uid ?: return
 
             // Ensure we have a valid anchor/centerpoint
             if (!renderer.isCenterpointSet()) {
@@ -443,7 +438,7 @@ class ARActivity : ComponentActivity() {
                 }
                 
                 val data = hashMapOf<String, Any>(
-                    "session_id" to sessionId,
+                    "user_id" to userId,
                     "pinned_location_id" to pinnedLocationDocId!!, // Explicit connection to centerpoint document
                     "pinned_location" to (pinnedLocationName ?: "Unknown Location"), // Name for readability
                     "inside_boundary" to true, // Always true since we filter before saving
@@ -531,12 +526,12 @@ class ARActivity : ComponentActivity() {
     }
 
     private fun saveCenterpointToFirebase(hitPose: com.google.ar.core.Pose) {
-        val sessionId = SessionManager.getSessionId(this) ?: SessionManager.getOrCreateSessionId(this)
+        val userId = auth.currentUser?.uid ?: return
         
         // Get device's current GPS location
         getCurrentLocationForCenterpoint { lat, lon ->
             // Find the most recent pinned location for this session to link the centerpoint to it
-            db.collection("devices").document(sessionId)
+            db.collection("users").document(userId)
                 .collection("pinned_locations")
                 .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
                 .limit(1)
@@ -583,7 +578,7 @@ class ARActivity : ComponentActivity() {
                         )
                         combinedData.putAll(centerpointData)
                         
-                        db.collection("devices").document(sessionId)
+                        db.collection("users").document(userId)
                             .collection("pinned_locations")
                             .add(combinedData)
                             .addOnSuccessListener { documentReference ->
