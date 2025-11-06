@@ -1142,16 +1142,11 @@ data class LocationWithStatus(
 @Composable
 fun GISScreen(selectedLocation: PinnedLocation? = null) {
     val db = remember { FirebaseFirestore.getInstance() }
-    val userId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
 
     var locationsWithStatus by remember { mutableStateOf<List<LocationWithStatus>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(userId) {
-        if (userId.isEmpty()) {
-            locationsWithStatus = emptyList()
-            return@LaunchedEffect
-        }
+    LaunchedEffect(Unit) {
         isLoading = true
         try {
             val pinnedLocationsSnapshot = db.collectionGroup("pinned_locations")
@@ -1167,15 +1162,13 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
                     longitude = pinnedDoc.getDouble("longitude") ?: 0.0,
                     timestamp = pinnedDoc.getTimestamp("timestamp")?.toDate()?.time ?: System.currentTimeMillis()
                 )
-                // Skip invalid coordinates
                 if (loc.latitude == 0.0 && loc.longitude == 0.0) continue
 
                 val pinnedLocationDocId = pinnedDoc.id
 
-                // Filter detections for this location and current user
+                // Global detections for this location (no user filter)
                 val trunks = db.collection("trunk_detections")
                     .whereEqualTo("pinned_location_id", pinnedLocationDocId)
-                    .whereEqualTo("user_id", userId)
                     .whereEqualTo("is_rhizophora", 1)
                     .get()
                     .await()
@@ -1301,28 +1294,26 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
             }
         )
 
-        // Legend
+        // Legend with requested format (compact box)
         Card(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .align(Alignment.TopStart)
+                .padding(start = 8.dp, top = 8.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
             )
         ) {
-            Row(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
                 Text("Status:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                LegendItem("≥ 80%", Color(0xFF4CAF50))
-                LegendItem("51-79%", Color(0xFF98FB98))
-                LegendItem("41-50%", Color(0xFFFFEB3B))
-                LegendItem("≤ 40%", Color(0xFFF44336))
+                Spacer(modifier = Modifier.height(4.dp))
+
+                LegendLine(color = Color(0xFF4CAF50), text = "≥ 80.0% = (Very Healthy)")
+                LegendLine(color = Color(0xFF98FB98), text = "≥ 51.0% and < 80.0% = (Healthy)")
+                LegendLine(color = Color(0xFFFFEB3B), text = "≥ 41.0% and < 51.0% = (Degraded)")
+                LegendLine(color = Color(0xFFF44336), text = "< 41.0% = (Very Degraded)")
             }
         }
 
@@ -1352,6 +1343,19 @@ private fun LegendItem(label: String, color: Color) {
         )
         Spacer(modifier = Modifier.width(6.dp))
         Text(label, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun LegendLine(color: Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+        Box(
+            modifier = Modifier
+                .size(14.dp)
+                .background(color, MaterialTheme.shapes.small)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall)
     }
 }
 
