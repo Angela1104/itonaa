@@ -32,6 +32,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.background
 
 class ARActivity : ComponentActivity() {
 
@@ -196,6 +197,7 @@ class ARActivity : ComponentActivity() {
     @Composable
     private fun DetectionOverlayUI() {
         var isDetecting by remember { mutableStateOf(false) }
+        var showHelp by remember { mutableStateOf(false) }
 
         val detectionsState = trunkDetector?.detections
         val rawDetections by (detectionsState?.collectAsState(initial = emptyList()) ?: remember { mutableStateOf(emptyList()) })
@@ -251,6 +253,22 @@ class ARActivity : ComponentActivity() {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             OverlayView(enrichedDetections, 640, 640, Modifier.fillMaxSize())
 
+            // Top-left help button
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)) {
+                Button(
+                    onClick = { showHelp = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier
+                        .size(40.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Text("?", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+
             // Enrich and persist detections when detection is running, boundary is visible, and we have detections
             // Process detections as they come in (real-time saving)
             LaunchedEffect(rawDetections, boundaryVisible, isDetecting) {
@@ -260,34 +278,7 @@ class ARActivity : ComponentActivity() {
                 }
             }
 
-            // Show instruction text when centerpoint is not set
-            if (!boundaryVisible && !centerpointSet) {
-                Card(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            "Surface Detection Active",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Double-tap on a detected surface (gray mesh) to set the centerpoint",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
-            }
+            // Center guide removed per request
 
             // ✅ Show "Start Detection" button only after boundary is visible
             if (boundaryVisible) {
@@ -322,6 +313,49 @@ class ARActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxWidth(0.8f)
                         ) { 
                             Text("End Detection") 
+                        }
+                    }
+                }
+            }
+
+            // Help overlay modal
+            if (showHelp) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "How to use AR Detection",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text("1. Move your phone to scan the surface until a gray mesh appears.", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text("2. Double-tap on the mesh to set the centerpoint (boundary will appear).", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text("3. Align the target trunk at the center of the screen.", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text("4. Tap 'Start Detection' to begin saving detections.", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text("5. Only Rhizophora inside the boundary will be saved.", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(12.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.End,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                TextButton(onClick = { showHelp = false }) {
+                                    Text("Close")
+                                }
+                            }
                         }
                     }
                 }
