@@ -9,6 +9,93 @@ object OSMGeocodingUtils {
     private const val OSM_REVERSE_GEOCODE_URL = "https://nominatim.openstreetmap.org/reverse"
 
     /**
+     * Data class to hold geocoding result with address and barangay
+     */
+    data class GeocodeResult(
+        val address: String,
+        val barangay: String?
+    )
+
+    /**
+     * Reverse geocode coordinates to get address and barangay information.
+     * @param latitude The latitude coordinate
+     * @param longitude The longitude coordinate
+     * @return GeocodeResult with address string and barangay (if found), or null if geocoding fails
+     */
+    suspend fun reverseGeocodeWithBarangay(latitude: Double, longitude: Double): GeocodeResult? = withContext(Dispatchers.IO) {
+        try {
+            val url = "$OSM_REVERSE_GEOCODE_URL?format=json&lat=$latitude&lon=$longitude&zoom=18&addressdetails=1"
+            
+            val connection = URL(url).openConnection().apply {
+                setRequestProperty("User-Agent", "BakhawOneApp/1.0")
+                connectTimeout = 10000
+                readTimeout = 10000
+            }
+            
+            val response = connection.getInputStream().bufferedReader().use { it.readText() }
+            val json = JSONObject(response)
+            
+            val address = json.optJSONObject("address")
+            if (address != null) {
+                // Extract barangay - try different fields that might contain barangay info
+                val barangay = address.optString("suburb")
+                    .takeIf { it.isNotEmpty() && it.contains("Barangay", ignoreCase = true) }
+                    ?: address.optString("neighbourhood")
+                    .takeIf { it.isNotEmpty() && it.contains("Barangay", ignoreCase = true) }
+                    ?: address.optString("village")
+                    .takeIf { it.isNotEmpty() && it.contains("Barangay", ignoreCase = true) }
+                    ?: address.optString("suburb")
+                    .takeIf { it.isNotEmpty() }
+                    ?: null
+                
+                // Clean barangay name - remove "Barangay" prefix if present
+                val cleanBarangay = barangay?.replace("Barangay", "", ignoreCase = true)
+                    ?.replace("Brgy", "", ignoreCase = true)
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                
+                // Get display name for address
+                val displayName = json.optString("display_name", "")
+                val addressString = if (displayName.isNotEmpty()) {
+                    displayName
+                } else {
+                    // Fallback: build address from components
+                    val parts = mutableListOf<String>()
+                    address.optString("road")?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+                    address.optString("suburb")?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+                    address.optString("city")?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+                    address.optString("state")?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+                    address.optString("country")?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+                    
+                    if (parts.isNotEmpty()) {
+                        parts.joinToString(", ")
+                    } else {
+                        "$latitude, $longitude"
+                    }
+                }
+                
+                return@withContext GeocodeResult(
+                    address = addressString,
+                    barangay = cleanBarangay
+                )
+            }
+            
+            // If no address found, return coordinates as fallback
+            GeocodeResult(
+                address = "$latitude, $longitude",
+                barangay = null
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Return coordinates as fallback if geocoding fails
+            GeocodeResult(
+                address = "$latitude, $longitude",
+                barangay = null
+            )
+        }
+    }
+
+    /**
      * Reverse geocode coordinates to get a human-readable address using OSM Nominatim API.
      * @param latitude The latitude coordinate
      * @param longitude The longitude coordinate

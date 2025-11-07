@@ -11,9 +11,11 @@ import android.graphics.drawable.BitmapDrawable
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MyLocation
@@ -22,13 +24,16 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import com.bakhawone.thesis_bakhawone.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -69,7 +74,8 @@ fun HomeScreen(
     var hasLocationPermission by remember { mutableStateOf(false) }
     var showNameInputDialog by remember { mutableStateOf(false) }
     var currentGeoPoint by remember { mutableStateOf<GeoPoint?>(null) }
-    var geocodedAddress by remember { mutableStateOf<String?>(null) }
+        var geocodedAddress by remember { mutableStateOf<String?>(null) }
+        var geocodeResult by remember { mutableStateOf<com.bakhawone.thesis_bakhawone.OSMGeocodingUtils.GeocodeResult?>(null) }
     var locationName by remember { mutableStateOf("") }
     var isGeocoding by remember { mutableStateOf(false) }
     var userId by remember { mutableStateOf<String?>(null) }
@@ -166,16 +172,45 @@ fun HomeScreen(
                 }
             }
         )
+        
+        // App header with logo and name - transparent style
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Start
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.bakhawone),
+                contentDescription = "App Logo",
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop
+            )
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            Text(
+                text = "BakhawOne",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
 
         // Name input dialog - shown after geocoding is complete
         if (showNameInputDialog && currentGeoPoint != null) {
             AlertDialog(
-                onDismissRequest = { 
-                    showNameInputDialog = false
-                    currentGeoPoint = null
-                    geocodedAddress = null
-                    locationName = ""
-                },
+                    onDismissRequest = { 
+                        showNameInputDialog = false
+                        currentGeoPoint = null
+                        geocodedAddress = null
+                        geocodeResult = null
+                        locationName = ""
+                    },
                 title = { Text("Enter Location Name") },
                 text = {
                     Column {
@@ -183,11 +218,24 @@ fun HomeScreen(
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = locationName,
-                            onValueChange = { locationName = it },
+                            onValueChange = { 
+                                if (it.length <= 200) {
+                                    locationName = it
+                                }
+                            },
                             label = { Text("Location Name") },
                             placeholder = { Text(geocodedAddress ?: "Enter name") },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            supportingText = {
+                                Text(
+                                    text = "${locationName.length}/200",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (locationName.length > 200) MaterialTheme.colorScheme.error 
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            isError = locationName.length > 200
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
@@ -205,9 +253,16 @@ fun HomeScreen(
                                 return@Button
                             }
                             
+                            val trimmedName = locationName.trim()
+                            if (trimmedName.length > 200) {
+                                Toast.makeText(context, "Location name must be 200 characters or less", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            
                             val loc = currentGeoPoint!!
-                            val name = locationName.trim()
+                            val name = trimmedName.take(200) // Ensure it's within limit
                             val address = geocodedAddress ?: "${loc.latitude}, ${loc.longitude}"
+                            val barangay = geocodeResult?.barangay
                             // Determine current user ID
                             val uid = userId ?: auth.currentUser?.uid
                             if (uid == null) {
@@ -216,7 +271,7 @@ fun HomeScreen(
                             }
                             // Save pinned location to Firebase under /users/{uid}/pinned_locations/
                             val now = Date()
-                            val locationData = hashMapOf(
+                            val locationData = hashMapOf<String, Any>(
                                 "name" to name,
                                 "latitude" to loc.latitude,
                                 "longitude" to loc.longitude,
@@ -226,6 +281,10 @@ fun HomeScreen(
                                     timeZone = TimeZone.getTimeZone("UTC")
                                 }.format(now) // ISO string for human readability
                             )
+                            // Add barangay if available
+                            if (barangay != null) {
+                                locationData["barangay"] = barangay
+                            }
                             
                             db.collection("users").document(uid)
                                 .collection("pinned_locations")
@@ -244,6 +303,7 @@ fun HomeScreen(
                                     showNameInputDialog = false
                                     currentGeoPoint = null
                                     geocodedAddress = null
+                                    geocodeResult = null
                                     locationName = ""
                                     Toast.makeText(context, "Location saved successfully", Toast.LENGTH_SHORT).show()
                                     
@@ -267,12 +327,13 @@ fun HomeScreen(
                     ) { Text("Save & Open AR") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { 
-                        showNameInputDialog = false
-                        currentGeoPoint = null
-                        geocodedAddress = null
-                        locationName = ""
-                    }) { Text("Cancel") }
+                        TextButton(onClick = { 
+                            showNameInputDialog = false
+                            currentGeoPoint = null
+                            geocodedAddress = null
+                            geocodeResult = null
+                            locationName = ""
+                        }) { Text("Cancel") }
                 }
             )
         }
@@ -284,6 +345,7 @@ fun HomeScreen(
                 onDismissRequest = { 
                     // Allow cancellation by stopping geocoding
                     isGeocoding = false
+                    geocodeResult = null
                     geocodedAddress = currentGeoPoint?.let { "${it.latitude}, ${it.longitude}" }
                     showNameInputDialog = true
                 },
@@ -299,6 +361,7 @@ fun HomeScreen(
                 dismissButton = {
                     TextButton(onClick = {
                         isGeocoding = false
+                        geocodeResult = null
                         geocodedAddress = currentGeoPoint?.let { "${it.latitude}, ${it.longitude}" }
                         showNameInputDialog = true
                     }) {
@@ -322,18 +385,20 @@ fun HomeScreen(
                     mapView?.controller?.setZoom(17.0)
                     currentGeoPoint = geo
                     
-                    // Start reverse geocoding
+                    // Start reverse geocoding with barangay extraction
                     isGeocoding = true
                     scope.launch {
                         try {
-                            val address = OSMGeocodingUtils.reverseGeocode(geo.latitude, geo.longitude)
-                            geocodedAddress = address
-                            // Pre-fill location name with address if available
-                            locationName = address?.take(50) ?: ""
+                            val result = OSMGeocodingUtils.reverseGeocodeWithBarangay(geo.latitude, geo.longitude)
+                            geocodeResult = result
+                            geocodedAddress = result?.address
+                            // Pre-fill location name with address if available (limited to 200 characters)
+                            locationName = result?.address?.take(200) ?: ""
                             isGeocoding = false
                             showNameInputDialog = true
                         } catch (e: Exception) {
                             isGeocoding = false
+                            geocodeResult = null
                             geocodedAddress = "${geo.latitude}, ${geo.longitude}"
                             showNameInputDialog = true
                             Toast.makeText(context, "Could not fetch address, using coordinates", Toast.LENGTH_SHORT).show()

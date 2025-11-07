@@ -50,6 +50,7 @@ class ARActivity : ComponentActivity() {
     private var locationManager: LocationManager? = null
     private var pinnedLocationName: String? = null // Store pinned location name for detections
     private var pinnedLocationDocId: String? = null // Store pinned location document ID for explicit connection
+    private var pinnedLocationBarangay: String? = null // Store barangay for detections
     private var deviceStartLat: Double = 0.0 // GPS coordinates from HomeScreen
     private var deviceStartLon: Double = 0.0 // GPS coordinates from HomeScreen
     private val savedDetectionIds = mutableSetOf<String>() // Track saved detections to prevent duplicates
@@ -533,6 +534,10 @@ class ARActivity : ComponentActivity() {
                     }.format(now),
                     "timestamp_firestore" to com.google.firebase.Timestamp.now()
                 )
+                // Add barangay if available
+                if (pinnedLocationBarangay != null) {
+                    data["barangay"] = pinnedLocationBarangay!!
+                }
 
                 // Save to /trunk_detections/ collection
                 db.collection("trunk_detections")
@@ -647,6 +652,7 @@ class ARActivity : ComponentActivity() {
                         val pinnedLocationDoc = snapshot.documents[0]
                         pinnedLocationName = pinnedLocationDoc.getString("name") // Store name for detections
                         pinnedLocationDocId = pinnedLocationDoc.id // Store document ID for explicit connection
+                        pinnedLocationBarangay = pinnedLocationDoc.getString("barangay") // Store barangay for detections
                         pinnedLocationDoc.reference
                             .update(centerpointData)
                             .addOnSuccessListener {

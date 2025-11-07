@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.Icons.Default
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -67,29 +68,8 @@ fun RecordScreen(
     onTabSelected: (Int) -> Unit,
     onLocationCleared: () -> Unit = {}
 ) {
-    // Navigation buttons removed - Diagrams, Reports, and GIS Map are now accessible from HomeScreen bottom sheet
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp)
-        ) {
-            Text(
-                text = "View Insights",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-            Text(
-                text = "Access Diagrams, Reports, and GIS Map from the Home screen using the insights panel.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.secondary,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-        }
-    }
+    // Show Barangay Trends screen
+    BarangayTrendsScreen()
 }
 
 @Composable
@@ -101,7 +81,6 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
     var monthDataList by remember { mutableStateOf<List<MonthData>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var pinnedLocationDocId by remember { mutableStateOf<String?>(null) }
-    var selectedYear by remember { mutableStateOf<Int?>(null) }
     
     // Find pinned_location_id from Firebase and load data grouped by month
     LaunchedEffect(selectedLocation) {
@@ -172,11 +151,6 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                         compareBy<MonthData> { it.year }.thenBy { it.month }
                     )
                     monthDataList = allMonths
-                    
-                    // Set default selected year to the most recent year if not set
-                    if (selectedYear == null && allMonths.isNotEmpty()) {
-                        selectedYear = allMonths.maxOfOrNull { it.year }
-                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("DiagramsScreen", "Error loading trunk data", e)
@@ -190,15 +164,6 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
     }
     
     if (selectedLocation != null) {
-        // Get available years from monthDataList
-        val availableYears = monthDataList.map { it.year }.distinct().sortedDescending()
-        // Filter monthDataList by selected year
-        val filteredMonthDataList = if (selectedYear != null) {
-            monthDataList.filter { it.year == selectedYear }
-        } else {
-            monthDataList
-        }
-        
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
@@ -219,7 +184,7 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                     )
                 } else {
                     if (monthDataList.isNotEmpty()) {
-                        // Location and filter container (above trends card)
+                        // Location info container
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -230,156 +195,35 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.Top
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Start
                             ) {
-                                // Location info on left side (65% of width)
-                                Row(
-                                    modifier = Modifier.weight(0.65f),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Start
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.LocationOn,
-                                        contentDescription = "Location",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        selectedLocation!!.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 3,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                                
-                                // Year filter button on right side (35% of width)
-                                if (availableYears.isNotEmpty()) {
-                                    Box(
-                                        modifier = Modifier.weight(0.35f),
-                                        contentAlignment = Alignment.CenterEnd
-                                    ) {
-                                        var expanded by remember { mutableStateOf(false) }
-                                        
-                                        Button(
-                                            onClick = { expanded = !expanded },
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFFA5D6A7) // Matcha green
-                                            ),
-                                            shape = RoundedCornerShape(20.dp),
-                                            modifier = Modifier
-                                                .height(36.dp)
-                                                .width(100.dp)
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Text(
-                                                    selectedYear?.toString() ?: "All",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = Color(0xFF1B5E20), // Dark green text
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                Icon(
-                                                    imageVector = if (expanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
-                                                    contentDescription = if (expanded) "Collapse" else "Expand",
-                                                    tint = Color(0xFF1B5E20),
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                        
-                                        DropdownMenu(
-                                            expanded = expanded,
-                                            onDismissRequest = { expanded = false },
-                                            modifier = Modifier.width(120.dp)
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text("All") },
-                                                onClick = {
-                                                    selectedYear = null
-                                                    expanded = false
-                                                }
-                                            )
-                                            availableYears.forEach { year ->
-                                                DropdownMenuItem(
-                                                    text = { Text(year.toString()) },
-                                                    onClick = {
-                                                        selectedYear = year
-                                                        expanded = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Trend Chart - Shows alive and dead counts over time
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 24.dp),
-                            elevation = CardDefaults.cardElevation(4.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.LocationOn,
+                                    contentDescription = "Location",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    "Trends Over Time",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    modifier = Modifier.padding(bottom = 16.dp)
+                                    selectedLocation!!.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                
-                                // Trend Line Chart
-                                TrendChart(
-                                    monthDataList = filteredMonthDataList,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(300.dp)
-                                        .padding(16.dp)
-                                )
-                                
-                                Spacer(modifier = Modifier.height(16.dp))
-                                
-                                // Legend for trend chart
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceEvenly
-                                ) {
-                                    LegendItem(
-                                        color = Color(0xFF4CAF50), // Green
-                                        label = "Alive",
-                                        count = filteredMonthDataList.sumOf { it.aliveCount }
-                                    )
-                                    LegendItem(
-                                        color = Color(0xFFF44336), // Red
-                                        label = "Dead",
-                                        count = filteredMonthDataList.sumOf { it.deadCount }
-                                    )
-                                }
                             }
                         }
                         
-                        // Generate pie chart for each month found in Firebase (filtered by year)
-                        filteredMonthDataList.forEachIndexed { index, monthData ->
+                        // Generate pie chart for each month found in Firebase
+                        monthDataList.forEachIndexed { index, monthData ->
                             val monthTotal = monthData.aliveCount + monthData.deadCount
                             
                             if (monthTotal > 0) {
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(bottom = if (index < filteredMonthDataList.size - 1) 16.dp else 24.dp),
+                                        .padding(bottom = if (index < monthDataList.size - 1) 16.dp else 24.dp),
                                     elevation = CardDefaults.cardElevation(4.dp)
                                 ) {
                                     Column(
@@ -865,6 +709,37 @@ fun ReportsScreen(
                 .verticalScroll(scrollState)
                 .padding(16.dp)
         ) {
+            // Location info container
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                elevation = CardDefaults.cardElevation(4.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.LocationOn,
+                        contentDescription = "Location",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        selectedLocation!!.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            
             // Display report for each month
             run {
                 val sortedEntries = monthTrunkMap.entries.sortedWith(
@@ -1319,5 +1194,346 @@ private fun LegendLine(color: Color, text: String) {
         Spacer(modifier = Modifier.width(8.dp))
         Text(text, style = MaterialTheme.typography.bodySmall)
     }
+}
+
+// Data class for barangay trend data
+data class BarangayMonthData(
+    val barangay: String,
+    val monthKey: String, // "YYYY-MM"
+    val monthName: String, // "January 2024"
+    val aliveCount: Int,
+    val deadCount: Int
+)
+
+@Composable
+fun BarangayTrendsScreen() {
+    val context = LocalContext.current
+    val db = remember { FirebaseFirestore.getInstance() }
+    
+    var barangayMonthData by remember { mutableStateOf<Map<String, List<BarangayMonthData>>>(emptyMap()) }
+    var availableBarangays by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedBarangay by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    
+    val monthNames = remember {
+        arrayOf(
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        )
+    }
+    
+    // Load trunk detections grouped by barangay and month
+    LaunchedEffect(Unit) {
+        isLoading = true
+        try {
+            // First, load all pinned locations to create a map of location ID -> barangay/address
+            val locationMap = mutableMapOf<String, Pair<String?, String>>() // locationId -> (barangay, address)
+            try {
+                val allLocations = db.collectionGroup("pinned_locations").get().await()
+                allLocations.documents.forEach { locationDoc ->
+                    val locationId = locationDoc.id
+                    val barangay = locationDoc.getString("barangay")
+                    val address = locationDoc.getString("address") ?: ""
+                    locationMap[locationId] = Pair(barangay, address)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("BarangayTrendsScreen", "Error loading locations", e)
+            }
+            
+            // Query all trunk detections
+            val trunkSnapshot = db.collection("trunk_detections")
+                .whereEqualTo("is_rhizophora", 1)
+                .get()
+                .await()
+            
+            // Map to store barangay -> month -> counts
+            val barangayDataMap = mutableMapOf<String, MutableMap<String, Pair<Int, Int>>>()
+            
+            // Process each trunk detection
+            trunkSnapshot.documents.forEach { doc ->
+                val barangay = doc.getString("barangay")
+                val isAlive = doc.getLong("is_alive") ?: 0
+                val timestamp = doc.getTimestamp("timestamp_firestore")
+                val pinnedLocationId = doc.getString("pinned_location_id")
+                
+                // Skip if no timestamp
+                if (timestamp == null) return@forEach
+                
+                // Get barangay from detection or pinned location
+                var finalBarangay = barangay
+                var isPuertoPrincesa = false
+                
+                if (finalBarangay == null && pinnedLocationId != null) {
+                    // Try to get barangay from pinned location map
+                    val locationInfo = locationMap[pinnedLocationId]
+                    if (locationInfo != null) {
+                        val (locationBarangay, address) = locationInfo
+                        finalBarangay = locationBarangay
+                        
+                        // Extract barangay from address if not in field
+                        if (finalBarangay == null) {
+                            finalBarangay = extractBarangayFromAddress(address)
+                        }
+                        
+                        // Check if in Puerto Princesa City
+                        isPuertoPrincesa = address.contains("Puerto Princesa", ignoreCase = true) ||
+                                         address.contains("Puerto Princesa City", ignoreCase = true)
+                    }
+                } else if (pinnedLocationId != null) {
+                    // Check if in Puerto Princesa City using location map
+                    val locationInfo = locationMap[pinnedLocationId]
+                    if (locationInfo != null) {
+                        val address = locationInfo.second
+                        isPuertoPrincesa = address.contains("Puerto Princesa", ignoreCase = true) ||
+                                         address.contains("Puerto Princesa City", ignoreCase = true)
+                    } else {
+                        // Assume Puerto Princesa if we can't check
+                        isPuertoPrincesa = true
+                    }
+                } else {
+                    // Assume Puerto Princesa if no location ID
+                    isPuertoPrincesa = true
+                }
+                
+                if (!isPuertoPrincesa || finalBarangay == null) {
+                    return@forEach
+                }
+                
+                // Get month from timestamp
+                val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                calendar.time = timestamp.toDate()
+                val year = calendar.get(Calendar.YEAR)
+                val month = calendar.get(Calendar.MONTH)
+                val monthKey = "$year-${String.format("%02d", month + 1)}"
+                
+                // Update counts
+                val dataMap = barangayDataMap.getOrPut(finalBarangay) { mutableMapOf() }
+                val (alive, dead) = dataMap.getOrPut(monthKey) { Pair(0, 0) }
+                dataMap[monthKey] = if (isAlive == 1L) {
+                    Pair(alive + 1, dead)
+                } else {
+                    Pair(alive, dead + 1)
+                }
+            }
+            
+            // Convert to BarangayMonthData format
+            val result = barangayDataMap.mapValues { (barangay, monthMap) ->
+                monthMap.map { (monthKey, counts) ->
+                    val parts = monthKey.split("-")
+                    val year = parts[0].toIntOrNull() ?: 2024
+                    val monthIndex = parts.getOrNull(1)?.toIntOrNull()?.minus(1) ?: 0
+                    val monthName = if (monthIndex in 0..11) {
+                        "${monthNames[monthIndex]} $year"
+                    } else {
+                        monthKey
+                    }
+                    BarangayMonthData(
+                        barangay = barangay,
+                        monthKey = monthKey,
+                        monthName = monthName,
+                        aliveCount = counts.first,
+                        deadCount = counts.second
+                    )
+                }.sortedBy { it.monthKey }
+            }
+            
+            barangayMonthData = result
+            availableBarangays = result.keys.sorted()
+            if (availableBarangays.isNotEmpty() && selectedBarangay == null) {
+                selectedBarangay = availableBarangays[0]
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("BarangayTrendsScreen", "Error loading data", e)
+        } finally {
+            isLoading = false
+        }
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        // Header
+        Text(
+            text = "Trends Over Time by Barangay",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Text(
+            text = "Puerto Princesa City",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+        
+        // Barangay filter dropdown
+        if (availableBarangays.isNotEmpty()) {
+            var expanded by remember { mutableStateOf(false) }
+            
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                elevation = CardDefaults.cardElevation(4.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Select Barangay",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Box {
+                        OutlinedButton(
+                            onClick = { expanded = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = selectedBarangay ?: "Select a barangay",
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Start
+                            )
+                            Icon(
+                                imageVector = Icons.Filled.ArrowDropDown,
+                                contentDescription = "Dropdown"
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            availableBarangays.forEach { barangay ->
+                                DropdownMenuItem(
+                                    text = { Text(barangay) },
+                                    onClick = {
+                                        selectedBarangay = barangay
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                    Text("Loading trends...", color = MaterialTheme.colorScheme.secondary)
+                }
+            }
+        } else if (availableBarangays.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "No detected trees found in Puerto Princesa City",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.secondary,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            // Display trends for selected barangay
+            selectedBarangay?.let { barangay ->
+                val monthDataList = barangayMonthData[barangay]?.map { data ->
+                    // Extract year and month from monthKey (format: "YYYY-MM")
+                    val parts = data.monthKey.split("-")
+                    val year = parts[0].toIntOrNull() ?: 2024
+                    val month = parts.getOrNull(1)?.toIntOrNull() ?: 1
+                    MonthData(
+                        monthName = data.monthName,
+                        year = year,
+                        month = month,
+                        aliveCount = data.aliveCount,
+                        deadCount = data.deadCount
+                    )
+                } ?: emptyList()
+                
+                if (monthDataList.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        elevation = CardDefaults.cardElevation(4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = barangay,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 16.dp)
+                            )
+                            
+                            // Trend chart
+                            TrendChart(
+                                monthDataList = monthDataList,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(300.dp)
+                                    .padding(vertical = 16.dp)
+                            )
+                            
+                            // Legend
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 16.dp),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                val totalAlive = monthDataList.sumOf { it.aliveCount }
+                                val totalDead = monthDataList.sumOf { it.deadCount }
+                                LegendItem(
+                                    color = Color(0xFF4CAF50),
+                                    label = "Alive",
+                                    count = totalAlive
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                LegendItem(
+                                    color = Color(0xFFF44336),
+                                    label = "Dead",
+                                    count = totalDead
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        "No data available for $barangay",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Helper function to extract barangay from address string
+private fun extractBarangayFromAddress(address: String): String? {
+    // Try to find "Barangay" or "Brgy" in the address
+    val patterns = listOf(
+        Regex("Barangay\\s+([^,]+)", RegexOption.IGNORE_CASE),
+        Regex("Brgy\\.?\\s+([^,]+)", RegexOption.IGNORE_CASE),
+        Regex("Brgy\\s+([^,]+)", RegexOption.IGNORE_CASE)
+    )
+    
+    for (pattern in patterns) {
+        val match = pattern.find(address)
+        if (match != null) {
+            return match.groupValues[1].trim()
+        }
+    }
+    
+    return null
 }
 
