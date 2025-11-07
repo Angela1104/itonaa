@@ -67,65 +67,27 @@ fun RecordScreen(
     onTabSelected: (Int) -> Unit,
     onLocationCleared: () -> Unit = {}
 ) {
-    val subTabs = listOf(
-        "Diagrams" to Icons.Default.BarChart,
-        "Reports" to Icons.Default.Description,
-        "GIS Map" to Icons.Default.Map
-    )
-
-    Column(
-        modifier = Modifier.fillMaxSize()
+    // Navigation buttons removed - Diagrams, Reports, and GIS Map are now accessible from HomeScreen bottom sheet
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
         ) {
-            subTabs.forEachIndexed { index, pair ->
-                val (label, icon) = pair
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable { onTabSelected(index) }
-                        .padding(8.dp)
-                ) {
-                    Icon(
-                        icon,
-                        contentDescription = label,
-                        tint = if (selectedTab == index) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (selectedTab == index) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.secondary
-                    )
-                }
-            }
-        }
-
-        Divider(
-            thickness = 1.dp,
-            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f),
-            modifier = Modifier.padding(vertical = 0.dp)
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .weight(1f)
-        ) {
-            when (selectedTab) {
-                0 -> DiagramsScreen(selectedLocation = selectedLocation)
-                1 -> ReportsScreen(
-                    pinnedLocations = pinnedLocations,
-                    selectedLocation = selectedLocation
-                )
-                2 -> GISScreen(selectedLocation = selectedLocation)
-            }
+            Text(
+                text = "View Insights",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            Text(
+                text = "Access Diagrams, Reports, and GIS Map from the Home screen using the insights panel.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
         }
     }
 }

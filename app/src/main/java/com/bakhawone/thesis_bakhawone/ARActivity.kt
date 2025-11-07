@@ -33,6 +33,10 @@ import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.*
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.mutableStateListOf
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 class ARActivity : ComponentActivity() {
 
@@ -49,10 +53,18 @@ class ARActivity : ComponentActivity() {
     private var deviceStartLat: Double = 0.0 // GPS coordinates from HomeScreen
     private var deviceStartLon: Double = 0.0 // GPS coordinates from HomeScreen
     private val savedDetectionIds = mutableSetOf<String>() // Track saved detections to prevent duplicates
+    private val savedMarkers = mutableStateListOf<SavedDetectionMarker>()
 
     // made non-private so ARRenderer can access them
     var detectionRunning = false
     var trunkDetector: TrunkDetection? = null
+
+    data class SavedDetectionMarker(
+        val id: String,
+        val localPosition: FloatArray,
+        val isAlive: Boolean,
+        val dbhCm: Float?
+    )
 
     // ✅ show controls only while boundary is currently visible
     private var boundaryVisible by mutableStateOf(false)
@@ -198,6 +210,7 @@ class ARActivity : ComponentActivity() {
     private fun DetectionOverlayUI() {
         var isDetecting by remember { mutableStateOf(false) }
         var showHelp by remember { mutableStateOf(false) }
+        val helpColor = Color(0xFF607048)
 
         val detectionsState = trunkDetector?.detections
         val rawDetections by (detectionsState?.collectAsState(initial = emptyList()) ?: remember { mutableStateOf(emptyList()) })
@@ -225,22 +238,31 @@ class ARActivity : ComponentActivity() {
                             val depth = wp.second
                             val inBoundary = renderer.isLocalPointInsideBoundary(localVec)
                             
+                            // Parse label: format is "Alive Rhizophora (85.3%)" or "Dead Rhizophora (90.1%)"
+                            val isRhizo = det.label.contains("Rhizophora", ignoreCase = true)
                             val isAlive = det.label.contains("Alive", ignoreCase = true)
+                            val isDead = det.label.contains("Dead", ignoreCase = true)
+                            
                             val fx = renderer.getFxPixels() ?: return@map det
                             val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
-                            val dbhMeters = if (isAlive && inBoundary) (boxWidthPxOnScreen * depth / fx) else null
+                            // Calculate DBH only for alive Rhizophora inside boundary
+                            val dbhMeters = if (isRhizo && isAlive && inBoundary) (boxWidthPxOnScreen * depth / fx) else null
                             val dbhCm = dbhMeters?.let { (it * 100f).coerceIn(0f, 500f) }
                             
                             det.copy(
-                                isRhizophora = det.label.contains("Rhizophora", ignoreCase = true),
-                                isAlive = if (det.label.contains("Rhizophora", ignoreCase = true)) isAlive else null,
+                                isRhizophora = isRhizo,
+                                isAlive = if (isRhizo) isAlive else null, // Only set isAlive for Rhizophora
                                 dbhCm = dbhCm,
                                 isInBoundary = inBoundary
                             )
                         } else {
+                            // No world point available - still mark Rhizophora status for overlay
+                            val isRhizo = det.label.contains("Rhizophora", ignoreCase = true)
+                            val isAlive = if (isRhizo) det.label.contains("Alive", ignoreCase = true) else null
                             det.copy(
-                                isRhizophora = det.label.contains("Rhizophora", ignoreCase = true),
-                                isAlive = if (det.label.contains("Rhizophora", ignoreCase = true)) det.label.contains("Alive", ignoreCase = true) else null
+                                isRhizophora = isRhizo,
+                                isAlive = isAlive,
+                                isInBoundary = null
                             )
                         }
                     } catch (e: Exception) {
@@ -251,7 +273,31 @@ class ARActivity : ComponentActivity() {
         }
 
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            OverlayView(enrichedDetections, 640, 640, Modifier.fillMaxSize())
+            var markerOverlays by remember { mutableStateOf<List<OverlayMarker>>(emptyList()) }
+
+            LaunchedEffect(savedMarkers.size, boundaryVisible) {
+                if (!boundaryVisible) {
+                    markerOverlays = emptyList()
+                    return@LaunchedEffect
+                }
+                while (isActive) {
+                    val projected = savedMarkers.mapNotNull { marker ->
+                        val screen = renderer.projectLocalPointToScreen(marker.localPosition)
+                        screen?.let { (sx, sy) ->
+                            OverlayMarker(
+                                screenX = sx,
+                                screenY = sy,
+                                isAlive = marker.isAlive,
+                                dbhCm = marker.dbhCm
+                            )
+                        }
+                    }
+                    markerOverlays = projected
+                    delay(33)
+                }
+            }
+
+            OverlayView(enrichedDetections, markerOverlays, 640, 640, Modifier.fillMaxSize())
 
             // Top-left help button
             Box(modifier = Modifier
@@ -265,7 +311,7 @@ class ARActivity : ComponentActivity() {
                         .size(40.dp)
                         .align(Alignment.TopStart)
                 ) {
-                    Text("?", style = MaterialTheme.typography.titleMedium)
+                    Text("?", style = MaterialTheme.typography.titleMedium, color = helpColor)
                 }
             }
 
@@ -335,25 +381,25 @@ class ARActivity : ComponentActivity() {
                             Text(
                                 "How to use AR Detection",
                                 style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.primary
+                                color = helpColor
                             )
                             Spacer(Modifier.height(8.dp))
-                            Text("1. Move your phone to scan the surface until a gray mesh appears.", style = MaterialTheme.typography.bodyMedium)
+                            Text("1. Move your phone to scan the surface until a gray mesh appears.", style = MaterialTheme.typography.bodyMedium, color = helpColor)
                             Spacer(Modifier.height(4.dp))
-                            Text("2. Double-tap on the mesh to set the centerpoint (boundary will appear).", style = MaterialTheme.typography.bodyMedium)
+                            Text("2. Double-tap on the mesh to set the centerpoint (boundary will appear).", style = MaterialTheme.typography.bodyMedium, color = helpColor)
                             Spacer(Modifier.height(4.dp))
-                            Text("3. Align the target trunk at the center of the screen.", style = MaterialTheme.typography.bodyMedium)
+                            Text("3. Align the target trunk at the center of the screen.", style = MaterialTheme.typography.bodyMedium, color = helpColor)
                             Spacer(Modifier.height(4.dp))
-                            Text("4. Tap 'Start Detection' to begin saving detections.", style = MaterialTheme.typography.bodyMedium)
+                            Text("4. Tap 'Start Detection' to begin saving detections.", style = MaterialTheme.typography.bodyMedium, color = helpColor)
                             Spacer(Modifier.height(4.dp))
-                            Text("5. Only Rhizophora inside the boundary will be saved.", style = MaterialTheme.typography.bodyMedium)
+                            Text("5. Only Rhizophora inside the boundary will be saved.", style = MaterialTheme.typography.bodyMedium, color = helpColor)
                             Spacer(Modifier.height(12.dp))
                             Row(
                                 horizontalArrangement = Arrangement.End,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 TextButton(onClick = { showHelp = false }) {
-                                    Text("Close")
+                                    Text("Close", color = helpColor)
                                 }
                             }
                         }
@@ -414,10 +460,11 @@ class ARActivity : ComponentActivity() {
             
             try {
                 // Step 1: Species Identification - Determine if Rhizophora
+                // Label format: "Alive Rhizophora (85.3%)" or "Dead Rhizophora (90.1%)"
                 val isRhizo = det.label.contains("Rhizophora", ignoreCase = true)
                 // Step 2: Status Classification - Alive or Dead
-                val isDead = det.label.contains("Dead", ignoreCase = true)
                 val isAlive = det.label.contains("Alive", ignoreCase = true)
+                val isDead = det.label.contains("Dead", ignoreCase = true)
                 
                 // Calculate screen position for boundary check (recalculate for processing)
                 val centerXImg = (det.box.left + det.box.right) / 2f
@@ -459,7 +506,8 @@ class ARActivity : ComponentActivity() {
                 // Step 4: DBH Measurement (only for alive trunks)
                 val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
                 val dbhMeters = if (isAlive) (boxWidthPxOnScreen * depth / fx) else null
-                val dbhCm = dbhMeters?.let { (it * 100f).coerceIn(0f, 500f) } ?: 0f
+                val rawDbhCm = dbhMeters?.let { (it * 100f).coerceIn(0f, 500f) }
+                val dbhCmForFirestore = rawDbhCm ?: 0f
 
                 // Step 5: Data Saving - Store in Firebase with proper structure
                 val trunkId = "trunk_${java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8)}"
@@ -479,7 +527,7 @@ class ARActivity : ComponentActivity() {
                     "vector_position" to listOf(localVec[0], localVec[1], localVec[2]), // Relative to centerpoint (0,0,0)
                     "is_rhizophora" to 1,
                     "is_alive" to (if (isAlive) 1 else 0),
-                    "dbh_cm" to dbhCm,
+                    "dbh_cm" to dbhCmForFirestore,
                     "timestamp" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                         timeZone = TimeZone.getTimeZone("UTC")
                     }.format(now),
@@ -492,6 +540,16 @@ class ARActivity : ComponentActivity() {
                     .set(data)
                     .addOnSuccessListener {
                         savedDetectionIds.add(posKey) // Mark as saved
+                        if (savedMarkers.none { it.id == posKey }) {
+                            savedMarkers.add(
+                                SavedDetectionMarker(
+                                    id = posKey,
+                                    localPosition = floatArrayOf(localVec[0], localVec[1], localVec[2]),
+                                    isAlive = isAlive,
+                                    dbhCm = rawDbhCm
+                                )
+                            )
+                        }
                         Log.d("ARActivity", "Trunk detection saved (center of frame): $trunkId")
                     }
                     .addOnFailureListener { e ->

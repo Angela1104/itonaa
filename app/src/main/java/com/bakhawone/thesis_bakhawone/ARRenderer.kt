@@ -28,6 +28,8 @@ class ARRenderer(
     private var lastFrame: Frame? = null
     private var lastCamera: Camera? = null
     private val boundaryRadiusMeters = 17.841f
+    private var viewportWidth: Int = 0
+    private var viewportHeight: Int = 0
 
     // Get display rotation for proper AR orientation
     private val display: Display by lazy {
@@ -82,6 +84,8 @@ class ARRenderer(
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES20.glViewport(0, 0, width, height)
         session.setDisplayGeometry(display.rotation, width, height)
+        viewportWidth = width
+        viewportHeight = height
     }
 
     override fun onDrawFrame(gl: GL10?) {
@@ -218,6 +222,43 @@ class ARRenderer(
         return d <= boundaryRadiusMeters
     }
     
+    fun projectLocalPointToScreen(localPoint: FloatArray): Pair<Float, Float>? {
+        val frame = lastFrame ?: return null
+        val camera = lastCamera ?: return null
+        val anchor = anchor ?: return null
+        if (viewportWidth <= 0 || viewportHeight <= 0) return null
+        if (anchor.trackingState != TrackingState.TRACKING || camera.trackingState != TrackingState.TRACKING) return null
+
+        return try {
+            val worldPoint = anchor.pose.transformPoint(localPoint)
+
+            val viewMatrix = FloatArray(16)
+            val projectionMatrix = FloatArray(16)
+            camera.getViewMatrix(viewMatrix, 0)
+            camera.getProjectionMatrix(projectionMatrix, 0, 0.1f, 100f)
+
+            val worldVec = floatArrayOf(worldPoint[0], worldPoint[1], worldPoint[2], 1f)
+            val viewVec = FloatArray(4)
+            android.opengl.Matrix.multiplyMV(viewVec, 0, viewMatrix, 0, worldVec, 0)
+
+            val clipVec = FloatArray(4)
+            android.opengl.Matrix.multiplyMV(clipVec, 0, projectionMatrix, 0, viewVec, 0)
+            val w = clipVec[3]
+            if (w == 0f) return null
+
+            val ndcX = clipVec[0] / w
+            val ndcY = clipVec[1] / w
+
+            val screenX = (ndcX * 0.5f + 0.5f) * viewportWidth
+            val screenY = ((-ndcY) * 0.5f + 0.5f) * viewportHeight
+
+            if (screenX.isNaN() || screenY.isNaN()) null else (screenX to screenY)
+        } catch (e: Exception) {
+            Log.e("ARRenderer", "projectLocalPointToScreen failed", e)
+            null
+        }
+    }
+ 
     /**
      * Perform hit test on screen coordinates to find tapped plane.
      * Returns the hit pose if a plane was tapped, null otherwise.

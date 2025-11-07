@@ -11,10 +11,14 @@ import android.graphics.drawable.BitmapDrawable
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,7 +28,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlin.math.max
+import kotlin.math.min
 import com.bakhawone.thesis_bakhawone.ARActivity
 import com.bakhawone.thesis_bakhawone.OSMGeocodingUtils
 import com.bakhawone.thesis_bakhawone.PinnedLocation
@@ -32,7 +41,6 @@ import com.bakhawone.thesis_bakhawone.PinnedLocation
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.Timestamp
-import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
@@ -44,9 +52,12 @@ import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onLocationSelected: ((PinnedLocation) -> Unit)? = null
+    onLocationSelected: ((PinnedLocation) -> Unit)? = null,
+    onOpenInsights: ((PinnedLocation?) -> Unit)? = null,
+    onCurrentLocationButtonReady: ((() -> Unit) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val auth = remember { FirebaseAuth.getInstance() }
@@ -65,10 +76,6 @@ fun HomeScreen(
     
     // Store pinned locations to display on map
     val pinnedLocations = remember { mutableStateListOf<PinnedLocation>() }
-    
-    // Dialog state for location tap action
-    var clickedLocation by remember { mutableStateOf<PinnedLocation?>(null) }
-    var showLocationActionDialog by remember { mutableStateOf(false) }
 
     // Initialize user and check permissions on launch
     LaunchedEffect(Unit) {
@@ -154,9 +161,8 @@ fun HomeScreen(
             update = { view ->
                 // Update markers when pinned locations change
                 updatePinnedLocationMarkers(view, pinnedLocations) { location ->
-                    // When marker is clicked, show action dialog
-                    clickedLocation = location
-                    showLocationActionDialog = true
+                    // When marker is clicked, automatically open insights panel
+                    onOpenInsights?.invoke(location)
                 }
             }
         )
@@ -271,63 +277,6 @@ fun HomeScreen(
             )
         }
 
-        // Location action dialog (Detect Again or View Records)
-        if (showLocationActionDialog && clickedLocation != null) {
-            AlertDialog(
-                onDismissRequest = { 
-                    showLocationActionDialog = false
-                    clickedLocation = null
-                },
-                title = null,
-                text = {
-                    if (clickedLocation!!.address.isNotBlank()) {
-                        Text(
-                            clickedLocation!!.address,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontSize = 11.sp,
-                            maxLines = 5,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                },
-                confirmButton = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                // Detect Again - Launch AR Activity
-                                val location = clickedLocation!!
-                                val intent = Intent(context, ARActivity::class.java).apply {
-                                    putExtra("deviceStartLat", location.latitude)
-                                    putExtra("deviceStartLon", location.longitude)
-                                    putExtra("locationName", location.name)
-                                }
-                                context.startActivity(intent)
-                                showLocationActionDialog = false
-                                clickedLocation = null
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Detect Again", fontSize = 12.sp)
-                        }
-                        Button(
-                            onClick = {
-                                // View Records - Navigate to RecordScreen
-                                onLocationSelected?.invoke(clickedLocation!!)
-                                showLocationActionDialog = false
-                                clickedLocation = null
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("View Records", fontSize = 12.sp)
-                        }
-                    }
-                }
-            )
-        }
 
         // Geocoding progress dialog
         if (isGeocoding) {
@@ -359,11 +308,12 @@ fun HomeScreen(
             )
         }
 
-        FloatingActionButton(
-            onClick = {
+        // Expose the current location click handler to DashboardActivity
+        LaunchedEffect(mapView, locationOverlay, hasLocationPermission) {
+            val handler: () -> Unit = handler@{
                 if (!hasLocationPermission) {
                     locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                    return@FloatingActionButton
+                    return@handler
                 }
                 val loc = locationOverlay?.myLocation
                 if (loc != null) {
@@ -394,11 +344,8 @@ fun HomeScreen(
                     locationOverlay?.enableMyLocation()
                     locationOverlay?.enableFollowLocation()
                 }
-            },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-            containerColor = MaterialTheme.colorScheme.primary
-        ) {
-            Icon(Icons.Filled.MyLocation, contentDescription = "Center on My Location")
+            }
+            onCurrentLocationButtonReady?.invoke(handler)
         }
     }
 }
