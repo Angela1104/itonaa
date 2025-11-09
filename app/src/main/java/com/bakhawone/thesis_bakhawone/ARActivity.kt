@@ -602,6 +602,18 @@ class ARActivity : ComponentActivity() {
     private fun goToDashboard() {
         // Navigate back to HomeScreen (DashboardActivity)
         val intent = Intent(this, DashboardActivity::class.java)
+        
+        // Pass location information so DashboardActivity can show the detected trunk data
+        if (pinnedLocationName != null) {
+            intent.putExtra("showDetectedTrunkData", true)
+            intent.putExtra("locationName", pinnedLocationName)
+            intent.putExtra("locationLat", deviceStartLat)
+            intent.putExtra("locationLon", deviceStartLon)
+            if (pinnedLocationDocId != null) {
+                intent.putExtra("locationDocId", pinnedLocationDocId)
+            }
+        }
+        
         startActivity(intent)
         finish()
     }

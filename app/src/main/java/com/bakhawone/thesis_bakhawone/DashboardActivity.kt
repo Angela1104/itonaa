@@ -118,9 +118,27 @@ class DashboardActivity : ComponentActivity() {
         // OSMDroid config
         Configuration.getInstance().load(applicationContext, getPreferences(MODE_PRIVATE))
 
+        // Check if we should show detected trunk data from AR detection
+        val showDetectedTrunkData = intent.getBooleanExtra("showDetectedTrunkData", false)
+        val locationName = intent.getStringExtra("locationName")
+        val locationLat = intent.getDoubleExtra("locationLat", 0.0)
+        val locationLon = intent.getDoubleExtra("locationLon", 0.0)
+        val locationDocId = intent.getStringExtra("locationDocId")
+
         setContent {
             ThesisbakhawoneTheme {
-                DashboardApp()
+                DashboardApp(
+                    initialLocationForInsights = if (showDetectedTrunkData && locationName != null) {
+                        PinnedLocation(
+                            name = locationName,
+                            address = "",
+                            latitude = locationLat,
+                            longitude = locationLon,
+                            timestamp = System.currentTimeMillis()
+                        )
+                    } else null,
+                    shouldExpandSheet = showDetectedTrunkData
+                )
             }
         }
     }
@@ -140,7 +158,10 @@ class DashboardActivity : ComponentActivity() {
 
 @OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardApp() {
+fun DashboardApp(
+    initialLocationForInsights: PinnedLocation? = null,
+    shouldExpandSheet: Boolean = false
+) {
     var selectedIndex by remember { mutableIntStateOf(0) }
     var selectedRecordTab by remember { mutableIntStateOf(0) }
     var selectedLocation by remember { mutableStateOf<PinnedLocation?>(null) }
@@ -151,7 +172,7 @@ fun DashboardApp() {
     
     // Bottom sheet state for Reports/Diagrams/GIS
     var selectedInsightTab by remember { mutableIntStateOf(0) } // 0=Diagrams, 1=Reports, 2=GIS
-    var selectedLocationForInsights by remember { mutableStateOf<PinnedLocation?>(null) }
+    var selectedLocationForInsights by remember { mutableStateOf<PinnedLocation?>(initialLocationForInsights) }
     
     // Current location button handler from HomeScreen
     var currentLocationClickHandler by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -163,7 +184,8 @@ fun DashboardApp() {
     val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
     val navBarHeightPx = with(density) { navigationBarHeight.toPx() }
     val maxSheetHeight = screenHeight - navBarHeightPx
-    var sheetOffsetY by remember { mutableFloatStateOf(maxSheetHeight * 0.80f) } // Start in collapsed/peek state (20% visible)
+    // Start at 50% if shouldExpandSheet is true, otherwise start collapsed (20% visible)
+    var sheetOffsetY by remember { mutableFloatStateOf(if (shouldExpandSheet) maxSheetHeight * 0.5f else maxSheetHeight * 0.80f) }
     
     // Smooth animated offset for better drag experience
     val animatedSheetOffsetY = androidx.compose.animation.core.animateFloatAsState(
@@ -203,6 +225,20 @@ fun DashboardApp() {
                     pinnedLocations.clear()
                     pinnedLocations.addAll(locations)
                 }
+        }
+    }
+    
+    // Match initial location with loaded pinned locations to get full address
+    LaunchedEffect(pinnedLocations.size, initialLocationForInsights) {
+        if (initialLocationForInsights != null && pinnedLocations.isNotEmpty()) {
+            val matchedLocation = pinnedLocations.find { loc ->
+                loc.name == initialLocationForInsights.name &&
+                kotlin.math.abs(loc.latitude - initialLocationForInsights.latitude) < 0.0001 &&
+                kotlin.math.abs(loc.longitude - initialLocationForInsights.longitude) < 0.0001
+            }
+            if (matchedLocation != null) {
+                selectedLocationForInsights = matchedLocation
+            }
         }
     }
 
