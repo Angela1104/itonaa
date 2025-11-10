@@ -12,13 +12,9 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -27,22 +23,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.bakhawone.thesis_bakhawone.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlin.math.max
-import kotlin.math.min
 import com.bakhawone.thesis_bakhawone.ARActivity
 import com.bakhawone.thesis_bakhawone.OSMGeocodingUtils
 import com.bakhawone.thesis_bakhawone.PinnedLocation
-// SessionManager removed: switch to user-based storage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.Timestamp
@@ -60,11 +54,14 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onLocationSelected: ((PinnedLocation) -> Unit)? = null,
     onOpenInsights: ((PinnedLocation?) -> Unit)? = null,
     onCurrentLocationButtonReady: ((() -> Unit) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+    val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
     val scope = rememberCoroutineScope()
@@ -80,22 +77,18 @@ fun HomeScreen(
     var isGeocoding by remember { mutableStateOf(false) }
     var userId by remember { mutableStateOf<String?>(null) }
     
-    // Store pinned locations to display on map
     val pinnedLocations = remember { mutableStateListOf<PinnedLocation>() }
 
-    // Initialize user and check permissions on launch
     LaunchedEffect(Unit) {
         userId = auth.currentUser?.uid
         if (userId == null) {
             Toast.makeText(context, "Please sign in to continue", Toast.LENGTH_LONG).show()
         }
         
-        // Check initial permission state
         val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         hasLocationPermission = fineGranted || coarseGranted
         
-        // Load pinned locations from Firebase to display on map
         val uid = userId
         if (uid != null) {
             loadPinnedLocations(context, db, uid) { locations ->
@@ -105,7 +98,6 @@ fun HomeScreen(
         }
     }
     
-    // Reload pinned locations when user ID changes or becomes available
     LaunchedEffect(userId) {
         if (userId != null) {
             loadPinnedLocations(context, db, userId!!) { locations ->
@@ -129,7 +121,6 @@ fun HomeScreen(
         }
     }
     
-    // Update location overlay when permission state changes
     LaunchedEffect(hasLocationPermission) {
         if (hasLocationPermission) {
             locationOverlay?.enableMyLocation()
@@ -151,12 +142,10 @@ fun HomeScreen(
                     controller.setCenter(GeoPoint(9.7439, 118.7357))
 
                     val overlay = MyLocationNewOverlay(GpsMyLocationProvider(ctx), this)
-                    // Location will be enabled when hasLocationPermission state updates
                     overlays.add(overlay)
                     locationOverlay = overlay
                     mapView = this
                     
-                    // Enable location if permission already granted
                     if (hasLocationPermission) {
                         overlay.enableMyLocation()
                         overlay.enableFollowLocation()
@@ -165,20 +154,17 @@ fun HomeScreen(
             },
             modifier = Modifier.fillMaxSize(),
             update = { view ->
-                // Update markers when pinned locations change
                 updatePinnedLocationMarkers(view, pinnedLocations) { location ->
-                    // When marker is clicked, automatically open insights panel
                     onOpenInsights?.invoke(location)
                 }
             }
         )
         
-        // App header with logo and name - transparent style
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
-                .padding(16.dp),
+                .padding(horizontal = if (isTablet) 24.dp else 16.dp, vertical = if (isLandscape) 8.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Start
         ) {
@@ -186,36 +172,48 @@ fun HomeScreen(
                 painter = painterResource(id = R.drawable.bakhawone),
                 contentDescription = "App Logo",
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(if (isTablet) 48.dp else 40.dp)
                     .clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop
             )
             
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(if (isTablet) 16.dp else 12.dp))
             
             Text(
                 text = "BakhawOne",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = if (isTablet) 24.sp else 20.sp
             )
         }
 
-        // Name input dialog - shown after geocoding is complete
         if (showNameInputDialog && currentGeoPoint != null) {
             AlertDialog(
-                    onDismissRequest = { 
-                        showNameInputDialog = false
-                        currentGeoPoint = null
-                        geocodedAddress = null
-                        geocodeResult = null
-                        locationName = ""
-                    },
-                title = { Text("Enter Location Name") },
+                onDismissRequest = { 
+                    showNameInputDialog = false
+                    currentGeoPoint = null
+                    geocodedAddress = null
+                    geocodeResult = null
+                    locationName = ""
+                },
+                title = { 
+                    Text(
+                        "Enter Location Name",
+                        style = MaterialTheme.typography.titleLarge
+                    ) 
+                },
                 text = {
-                    Column {
-                        Text("Please enter a name for this location:")
-                        Spacer(Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = if (isTablet) 500.dp else screenWidth * 0.9f)
+                    ) {
+                        Text(
+                            "Please enter a name for this location:",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(Modifier.height(12.dp))
                         OutlinedTextField(
                             value = locationName,
                             onValueChange = { 
@@ -237,11 +235,13 @@ fun HomeScreen(
                             },
                             isError = locationName.length > 200
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
                         Text(
                             "Address: ${geocodedAddress ?: "Unknown"}\n" +
                                     "Coordinates: ${String.format("%.6f", currentGeoPoint!!.latitude)}, ${String.format("%.6f", currentGeoPoint!!.longitude)}",
-                            style = MaterialTheme.typography.bodySmall
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },
@@ -260,28 +260,25 @@ fun HomeScreen(
                             }
                             
                             val loc = currentGeoPoint!!
-                            val name = trimmedName.take(200) // Ensure it's within limit
+                            val name = trimmedName.take(200)
                             val address = geocodedAddress ?: "${loc.latitude}, ${loc.longitude}"
                             val barangay = geocodeResult?.barangay
-                            // Determine current user ID
                             val uid = userId ?: auth.currentUser?.uid
                             if (uid == null) {
                                 Toast.makeText(context, "Please sign in to save locations", Toast.LENGTH_LONG).show()
                                 return@Button
                             }
-                            // Save pinned location to Firebase under /users/{uid}/pinned_locations/
                             val now = Date()
                             val locationData = hashMapOf<String, Any>(
                                 "name" to name,
                                 "latitude" to loc.latitude,
                                 "longitude" to loc.longitude,
                                 "address" to address,
-                                "timestamp" to Timestamp.now(), // Firestore Timestamp for querying
+                                "timestamp" to Timestamp.now(),
                                 "timestamp_iso" to SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                                     timeZone = TimeZone.getTimeZone("UTC")
-                                }.format(now) // ISO string for human readability
+                                }.format(now)
                             )
-                            // Add barangay if available
                             if (barangay != null) {
                                 locationData["barangay"] = barangay
                             }
@@ -290,7 +287,6 @@ fun HomeScreen(
                                 .collection("pinned_locations")
                                 .add(locationData)
                                 .addOnSuccessListener { documentReference ->
-                                    // Add to local list to update map immediately
                                     val newPinnedLocation = PinnedLocation(
                                         name = name,
                                         address = address,
@@ -307,13 +303,12 @@ fun HomeScreen(
                                     locationName = ""
                                     Toast.makeText(context, "Location saved successfully", Toast.LENGTH_SHORT).show()
                                     
-                                    // Transition to AR Activity
                                     val activity = context as? android.app.Activity
                                     activity?.let {
                                         val intent = Intent(it, ARActivity::class.java).apply {
                                             putExtra("deviceStartLat", loc.latitude)
                                             putExtra("deviceStartLon", loc.longitude)
-                                            putExtra("locationName", name) // Pass location name for easier access
+                                            putExtra("locationName", name)
                                         }
                                         it.startActivity(intent)
                                     }
@@ -339,22 +334,34 @@ fun HomeScreen(
         }
 
 
-        // Geocoding progress dialog
         if (isGeocoding) {
             AlertDialog(
                 onDismissRequest = { 
-                    // Allow cancellation by stopping geocoding
                     isGeocoding = false
                     geocodeResult = null
                     geocodedAddress = currentGeoPoint?.let { "${it.latitude}, ${it.longitude}" }
                     showNameInputDialog = true
                 },
-                title = { Text("Getting Address") },
+                title = { 
+                    Text(
+                        "Getting Address",
+                        style = MaterialTheme.typography.titleLarge
+                    ) 
+                },
                 text = {
-                    Column {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = if (isTablet) 400.dp else screenWidth * 0.8f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.padding(16.dp))
                         Spacer(Modifier.height(16.dp))
-                        Text("Looking up address for your location...")
+                        Text(
+                            "Looking up address for your location...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 },
                 confirmButton = { },
@@ -371,7 +378,6 @@ fun HomeScreen(
             )
         }
 
-        // Expose the current location click handler to DashboardActivity
         LaunchedEffect(mapView, locationOverlay, hasLocationPermission) {
             val handler: () -> Unit = handler@{
                 if (!hasLocationPermission) {
@@ -385,14 +391,12 @@ fun HomeScreen(
                     mapView?.controller?.setZoom(17.0)
                     currentGeoPoint = geo
                     
-                    // Start reverse geocoding with barangay extraction
                     isGeocoding = true
                     scope.launch {
                         try {
                             val result = OSMGeocodingUtils.reverseGeocodeWithBarangay(geo.latitude, geo.longitude)
                             geocodeResult = result
                             geocodedAddress = result?.address
-                            // Pre-fill location name with address if available (limited to 200 characters)
                             locationName = result?.address?.take(200) ?: ""
                             isGeocoding = false
                             showNameInputDialog = true
@@ -415,9 +419,6 @@ fun HomeScreen(
     }
 }
 
-/**
- * Load pinned locations from Firebase and call callback with the list
- */
 private fun loadPinnedLocations(
     context: android.content.Context,
     db: FirebaseFirestore,
@@ -453,11 +454,8 @@ private fun loadPinnedLocations(
         }
 }
 
-/**
- * Create a red pin icon bitmap similar to Google Maps
- */
 private fun createRedPinIcon(context: android.content.Context): Bitmap {
-    val size = 100 // Size of the pin icon
+    val size = 100
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     
@@ -466,32 +464,27 @@ private fun createRedPinIcon(context: android.content.Context): Bitmap {
         style = Paint.Style.FILL
     }
     
-    // Red color for the pin (Google Maps red: #EA4335)
     val redColor = android.graphics.Color.parseColor("#EA4335")
     
-    // Draw pin shape: circle on top + teardrop/triangle on bottom
     val centerX = size / 2f
-    val centerY = size / 2f - 5f // Slightly above center
+    val centerY = size / 2f - 5f
     val circleRadius = size * 0.2f
     
-    // Draw the circle (pin head)
     paint.color = redColor
     canvas.drawCircle(centerX, centerY, circleRadius, paint)
     
-    // Draw the teardrop shape (pin body)
     val path = Path()
     val bottomY = size * 0.95f
     val pinWidth = size * 0.25f
     
-    path.moveTo(centerX, centerY + circleRadius) // Start from bottom of circle
-    path.lineTo(centerX - pinWidth, bottomY) // Left side of teardrop
-    path.lineTo(centerX, bottomY - 3f) // Bottom point (slightly rounded)
-    path.lineTo(centerX + pinWidth, bottomY) // Right side of teardrop
+    path.moveTo(centerX, centerY + circleRadius)
+    path.lineTo(centerX - pinWidth, bottomY)
+    path.lineTo(centerX, bottomY - 3f)
+    path.lineTo(centerX + pinWidth, bottomY)
     path.close()
     
     canvas.drawPath(path, paint)
     
-    // Add a white circle in the center for the pin highlight
     paint.color = android.graphics.Color.WHITE
     val highlightRadius = circleRadius * 0.4f
     canvas.drawCircle(centerX - circleRadius * 0.3f, centerY - circleRadius * 0.3f, highlightRadius, paint)
@@ -499,9 +492,6 @@ private fun createRedPinIcon(context: android.content.Context): Bitmap {
     return bitmap
 }
 
-/**
- * Update markers on map for pinned locations
- */
 private fun updatePinnedLocationMarkers(
     mapView: MapView?,
     pinnedLocations: List<PinnedLocation>,
@@ -509,7 +499,6 @@ private fun updatePinnedLocationMarkers(
 ) {
     if (mapView == null) return
     
-    // Remove all existing pinned location markers (keep my location overlay)
     val overlaysToRemove = mutableListOf<org.osmdroid.views.overlay.Overlay>()
     mapView.overlays.forEach { overlay ->
         if (overlay is Marker && overlay.title?.startsWith("📍 ") == true) {
@@ -518,11 +507,9 @@ private fun updatePinnedLocationMarkers(
     }
     overlaysToRemove.forEach { mapView.overlays.remove(it) }
     
-    // Create red pin icon once (reuse for all markers)
     val context = mapView.context
     val redPinIcon = createRedPinIcon(context)
     
-    // Add markers for each pinned location
     pinnedLocations.forEach { location ->
         val marker = Marker(mapView).apply {
             position = GeoPoint(location.latitude, location.longitude)
@@ -531,18 +518,15 @@ private fun updatePinnedLocationMarkers(
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
             isDraggable = false
             
-            // Set red pin icon
             setIcon(android.graphics.drawable.BitmapDrawable(context.resources, redPinIcon))
             
-            // Handle marker click to show action dialog
             setOnMarkerClickListener { clickedMarker, mapView ->
                 onMarkerClicked?.invoke(location)
-                true // Return true to indicate we handled the click
+                true
             }
         }
         mapView.overlays.add(marker)
     }
     
-    // Refresh map to show markers
     mapView.invalidate()
 }

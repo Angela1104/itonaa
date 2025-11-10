@@ -1,45 +1,48 @@
 package com.bakhawone.thesis_bakhawone
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.sp
 import com.bakhawone.thesis_bakhawone.ui.theme.ThesisbakhawoneTheme
-import androidx.compose.foundation.Image
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.RoundedCornerShape
 import com.google.firebase.auth.FirebaseAuth
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import java.util.regex.Pattern
 
 class LoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Auto-skip login when remembered and user is signed in
         val prefs = getSharedPreferences("auth_prefs", MODE_PRIVATE)
         val isRemembered = prefs.getBoolean("remember_me", false)
-        val currentUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        val currentUser = FirebaseAuth.getInstance().currentUser
+        
         if (isRemembered && currentUser != null) {
-            startActivity(Intent(this, DashboardActivity::class.java))
+            val intent = Intent(this, DashboardActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+            startActivity(intent)
             finish()
             return
         }
@@ -49,7 +52,10 @@ class LoginActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     LoginScreen(
                         onLoginSuccess = {
-                            startActivity(Intent(this, DashboardActivity::class.java))
+                            val intent = Intent(this, DashboardActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            }
+                            startActivity(intent)
                             finish()
                         }
                     )
@@ -67,24 +73,44 @@ private fun LoginScreen(onLoginSuccess: () -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
     var resetEmail by remember { mutableStateOf("") }
+    var resetErrorText by remember { mutableStateOf<String?>(null) }
     var passwordVisible by remember { mutableStateOf(false) }
-    val auth = remember { FirebaseAuth.getInstance() }
-    val context = LocalContext.current
     var rememberMe by remember { mutableStateOf(false) }
 
+    val auth = remember { FirebaseAuth.getInstance() }
+    val context = LocalContext.current
+
+    fun isValidEmail(email: String): Boolean {
+        val emailPattern = Pattern.compile(
+            "^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\$"
+        )
+        return emailPattern.matcher(email.trim()).matches()
+    }
+
+    fun validateLoginInputs(): String? {
+        return when {
+            email.isBlank() || password.isBlank() -> "Please enter email and password"
+            !isValidEmail(email) -> "Please enter a valid email address"
+            else -> null
+        }
+    }
+
     fun handleLogin() {
-        if (email.isBlank() || password.isBlank()) {
-            errorText = "Please enter email and password"
+        val validationError = validateLoginInputs()
+        if (validationError != null) {
+            errorText = validationError
             return
         }
+
         isLoading = true
         errorText = null
+        
         auth.signInWithEmailAndPassword(email.trim(), password)
             .addOnCompleteListener { task ->
                 isLoading = false
                 if (task.isSuccessful) {
-                    // persist remember me preference
-                    val prefs = context.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE)
+                    // Persist remember me preference
+                    val prefs = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
                     prefs.edit().putBoolean("remember_me", rememberMe).apply()
                     onLoginSuccess()
                 } else {
@@ -93,20 +119,28 @@ private fun LoginScreen(onLoginSuccess: () -> Unit) {
             }
     }
 
-    fun handleSignUp() {
-        if (email.isBlank() || password.isBlank()) {
-            errorText = "Please enter email and password"
-            return
+    fun handlePasswordReset() {
+        resetErrorText = null
+        
+        when {
+            resetEmail.isBlank() -> {
+                resetErrorText = "Please enter your email"
+                return
+            }
+            !isValidEmail(resetEmail) -> {
+                resetErrorText = "Please enter a valid email address"
+                return
+            }
         }
-        isLoading = true
-        errorText = null
-        auth.createUserWithEmailAndPassword(email.trim(), password)
+
+        auth.sendPasswordResetEmail(resetEmail.trim())
             .addOnCompleteListener { task ->
-                isLoading = false
                 if (task.isSuccessful) {
-                    onLoginSuccess()
+                    showResetDialog = false
+                    errorText = "Password reset email sent. Please check your inbox."
+                    resetEmail = ""
                 } else {
-                    errorText = task.exception?.localizedMessage ?: "Account creation failed"
+                    resetErrorText = task.exception?.localizedMessage ?: "Failed to send reset email"
                 }
             }
     }
@@ -140,7 +174,10 @@ private fun LoginScreen(onLoginSuccess: () -> Unit) {
 
             OutlinedTextField(
                 value = email,
-                onValueChange = { email = it },
+                onValueChange = { 
+                    email = it
+                    errorText = null
+                },
                 label = { Text("Email") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
@@ -154,19 +191,34 @@ private fun LoginScreen(onLoginSuccess: () -> Unit) {
 
             OutlinedTextField(
                 value = password,
-                onValueChange = { password = it },
+                onValueChange = { 
+                    password = it
+                    errorText = null
+                },
                 label = { Text("Password") },
                 singleLine = true,
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisible) 
+                    VisualTransformation.None 
+                else 
+                    PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Done
                 ),
                 trailingIcon = {
-                    val visibilityIcon = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility
-                    val description = if (passwordVisible) "Hide password" else "Show password"
+                    val visibilityIcon = if (passwordVisible) 
+                        Icons.Default.VisibilityOff 
+                    else 
+                        Icons.Default.Visibility
+                    val description = if (passwordVisible) 
+                        "Hide password" 
+                    else 
+                        "Show password"
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(imageVector = visibilityIcon, contentDescription = description)
+                        Icon(
+                            imageVector = visibilityIcon, 
+                            contentDescription = description
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -178,13 +230,19 @@ private fun LoginScreen(onLoginSuccess: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Checkbox(checked = rememberMe, onCheckedChange = { rememberMe = it })
+                Checkbox(
+                    checked = rememberMe, 
+                    onCheckedChange = { rememberMe = it }
+                )
                 Text(text = "Remember me")
             }
 
             if (errorText != null) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(text = errorText!!, color = MaterialTheme.colorScheme.error)
+                Text(
+                    text = errorText!!, 
+                    color = MaterialTheme.colorScheme.error
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -211,16 +269,21 @@ private fun LoginScreen(onLoginSuccess: () -> Unit) {
                     .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                TextButton(onClick = {
-                    resetEmail = email
-                    showResetDialog = true
-                }) {
+                TextButton(
+                    onClick = {
+                        resetEmail = email
+                        resetErrorText = null
+                        showResetDialog = true
+                    }
+                ) {
                     Text("Forgot password?")
                 }
 
-                TextButton(onClick = {
-                    context.startActivity(Intent(context, SignupActivity::class.java))
-                }) {
+                TextButton(
+                    onClick = {
+                        context.startActivity(Intent(context, SignupActivity::class.java))
+                    }
+                ) {
                     Text("Create account")
                 }
             }
@@ -229,7 +292,10 @@ private fun LoginScreen(onLoginSuccess: () -> Unit) {
 
     if (showResetDialog) {
         AlertDialog(
-            onDismissRequest = { showResetDialog = false },
+            onDismissRequest = { 
+                showResetDialog = false
+                resetErrorText = null
+            },
             title = { Text("Reset Password") },
             text = {
                 Column {
@@ -237,44 +303,44 @@ private fun LoginScreen(onLoginSuccess: () -> Unit) {
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = resetEmail,
-                        onValueChange = { resetEmail = it },
+                        onValueChange = { 
+                            resetEmail = it
+                            resetErrorText = null
+                        },
                         label = { Text("Email") },
                         singleLine = true,
+                        isError = resetErrorText != null,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Email,
                             imeAction = ImeAction.Done
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (resetErrorText != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = resetErrorText!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (resetEmail.isBlank()) {
-                        errorText = "Please enter your email"
-                        showResetDialog = false
-                        return@TextButton
-                    }
-                    auth.sendPasswordResetEmail(resetEmail.trim())
-                        .addOnCompleteListener { task ->
-                            showResetDialog = false
-                            errorText = if (task.isSuccessful) {
-                                "Password reset email sent"
-                            } else {
-                                task.exception?.localizedMessage ?: "Failed to send reset email"
-                            }
-                        }
-                }) {
+                TextButton(onClick = { handlePasswordReset() }) {
                     Text("Send")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
+                TextButton(
+                    onClick = { 
+                        showResetDialog = false
+                        resetErrorText = null
+                    }
+                ) {
                     Text("Cancel")
                 }
             }
         )
     }
 }
-
-

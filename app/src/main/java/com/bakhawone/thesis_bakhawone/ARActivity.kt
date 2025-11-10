@@ -343,6 +343,9 @@ class ARActivity : ComponentActivity() {
                             }
                         },
                         enabled = !isDetecting,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        ),
                         modifier = Modifier
                             .fillMaxWidth(0.8f)
                             .padding(bottom = 8.dp)
@@ -357,6 +360,9 @@ class ARActivity : ComponentActivity() {
                                 isDetecting = false
                                 goToDashboard()
                             },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
                             modifier = Modifier.fillMaxWidth(0.8f)
                         ) { 
                             Text("End Detection") 

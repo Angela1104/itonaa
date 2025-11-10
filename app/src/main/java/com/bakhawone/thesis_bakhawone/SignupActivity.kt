@@ -7,6 +7,10 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,10 +28,7 @@ import com.bakhawone.thesis_bakhawone.ui.theme.ThesisbakhawoneTheme
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import java.util.regex.Pattern
 
 class SignupActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,7 +39,10 @@ class SignupActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     SignupScreen(
                         onSignupSuccess = {
-                            startActivity(Intent(this, DashboardActivity::class.java))
+                            val intent = Intent(this, DashboardActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            }
+                            startActivity(intent)
                             finish()
                         },
                         onNavigateBackToLogin = { finish() }
@@ -67,62 +71,90 @@ private fun SignupScreen(
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
 
-    fun validate(): Boolean {
-        if (name.isBlank() || email.isBlank() || organization.isBlank() || password.isBlank() || confirmPassword.isBlank()) {
-            errorText = "Please fill in all fields"
-            return false
+    fun isValidEmail(email: String): Boolean {
+        val emailPattern = Pattern.compile(
+            "^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\$"
+        )
+        return emailPattern.matcher(email.trim()).matches()
+    }
+
+    fun validateInputs(): String? {
+        return when {
+            name.isBlank() || email.isBlank() || organization.isBlank() || 
+            password.isBlank() || confirmPassword.isBlank() -> {
+                "Please fill in all fields"
+            }
+            !isValidEmail(email) -> {
+                "Please enter a valid email address"
+            }
+            password.length < 6 -> {
+                "Password must be at least 6 characters"
+            }
+            password != confirmPassword -> {
+                "Passwords do not match"
+            }
+            else -> null
         }
-        if (password.length < 6) {
-            errorText = "Password must be at least 6 characters"
-            return false
-        }
-        if (password != confirmPassword) {
-            errorText = "Passwords do not match"
-            return false
-        }
-        return true
     }
 
     fun handleSignup() {
-        if (!validate()) return
+        val validationError = validateInputs()
+        if (validationError != null) {
+            errorText = validationError
+            return
+        }
+
         isLoading = true
         errorText = null
+        
         val trimmedEmail = email.trim()
+        val trimmedName = name.trim()
+        val trimmedOrganization = organization.trim()
+
         auth.createUserWithEmailAndPassword(trimmedEmail, password)
-            .addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val user = auth.currentUser
-                    val profileUpdate = UserProfileChangeRequest.Builder()
-                        .setDisplayName(name.trim())
-                        .build()
-                    user?.updateProfile(profileUpdate)
-                        ?.addOnCompleteListener {
-                            val uid = user?.uid
-                            if (uid != null) {
-                                val userDoc = mapOf(
-                                    "name" to name.trim(),
-                                    "email" to trimmedEmail,
-                                    "organization" to organization.trim()
-                                )
-                                db.collection("users").document(uid)
-                                    .set(userDoc)
-                                    .addOnCompleteListener { writeTask ->
-                                        isLoading = false
-                                        if (writeTask.isSuccessful) {
-                                            onSignupSuccess()
-                                        } else {
-                                            errorText = writeTask.exception?.localizedMessage ?: "Failed to save profile"
-                                        }
-                                    }
-                            } else {
-                                isLoading = false
-                                errorText = "Failed to get user id"
-                            }
-                        }
-                } else {
+            .addOnCompleteListener { createTask ->
+                if (!createTask.isSuccessful) {
                     isLoading = false
-                    errorText = task.exception?.localizedMessage ?: "Sign up failed"
+                    errorText = createTask.exception?.localizedMessage ?: "Sign up failed"
+                    return@addOnCompleteListener
                 }
+
+                val user = auth.currentUser
+                if (user == null) {
+                    isLoading = false
+                    errorText = "Failed to create user account"
+                    return@addOnCompleteListener
+                }
+
+                val profileUpdate = UserProfileChangeRequest.Builder()
+                    .setDisplayName(trimmedName)
+                    .build()
+
+                user.updateProfile(profileUpdate)
+                    .addOnCompleteListener { profileTask ->
+                        if (!profileTask.isSuccessful) {
+                            errorText = "Account created but profile update failed"
+                        }
+
+                        val userDoc = mapOf(
+                            "name" to trimmedName,
+                            "email" to trimmedEmail,
+                            "organization" to trimmedOrganization
+                        )
+
+                        db.collection("users").document(user.uid)
+                            .set(userDoc)
+                            .addOnCompleteListener { writeTask ->
+                                isLoading = false
+                                
+                                if (writeTask.isSuccessful) {
+                                    onSignupSuccess()
+                                } else {
+                                    errorText = writeTask.exception?.localizedMessage 
+                                        ?: "Account created but failed to save profile"
+                                }
+                            }
+                    }
             }
     }
 
@@ -155,7 +187,10 @@ private fun SignupScreen(
 
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it },
+                onValueChange = { 
+                    name = it
+                    errorText = null
+                },
                 label = { Text("Name") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
@@ -169,7 +204,10 @@ private fun SignupScreen(
 
             OutlinedTextField(
                 value = email,
-                onValueChange = { email = it },
+                onValueChange = { 
+                    email = it
+                    errorText = null
+                },
                 label = { Text("Email") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
@@ -183,7 +221,10 @@ private fun SignupScreen(
 
             OutlinedTextField(
                 value = organization,
-                onValueChange = { organization = it },
+                onValueChange = { 
+                    organization = it
+                    errorText = null
+                },
                 label = { Text("Organization") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
@@ -197,19 +238,34 @@ private fun SignupScreen(
 
             OutlinedTextField(
                 value = password,
-                onValueChange = { password = it },
+                onValueChange = { 
+                    password = it
+                    errorText = null
+                },
                 label = { Text("Password") },
                 singleLine = true,
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisible) 
+                    VisualTransformation.None 
+                else 
+                    PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Next
                 ),
                 trailingIcon = {
-                    val visibilityIcon = if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility
-                    val description = if (passwordVisible) "Hide password" else "Show password"
+                    val visibilityIcon = if (passwordVisible) 
+                        Icons.Filled.VisibilityOff 
+                    else 
+                        Icons.Filled.Visibility
+                    val description = if (passwordVisible) 
+                        "Hide password" 
+                    else 
+                        "Show password"
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(imageVector = visibilityIcon, contentDescription = description)
+                        Icon(
+                            imageVector = visibilityIcon, 
+                            contentDescription = description
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -219,19 +275,34 @@ private fun SignupScreen(
 
             OutlinedTextField(
                 value = confirmPassword,
-                onValueChange = { confirmPassword = it },
+                onValueChange = { 
+                    confirmPassword = it
+                    errorText = null
+                },
                 label = { Text("Confirm Password") },
                 singleLine = true,
-                visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                visualTransformation = if (confirmPasswordVisible) 
+                    VisualTransformation.None 
+                else 
+                    PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Done
                 ),
                 trailingIcon = {
-                    val visibilityIcon = if (confirmPasswordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility
-                    val description = if (confirmPasswordVisible) "Hide password" else "Show password"
+                    val visibilityIcon = if (confirmPasswordVisible) 
+                        Icons.Filled.VisibilityOff 
+                    else 
+                        Icons.Filled.Visibility
+                    val description = if (confirmPasswordVisible) 
+                        "Hide password" 
+                    else 
+                        "Show password"
                     IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
-                        Icon(imageVector = visibilityIcon, contentDescription = description)
+                        Icon(
+                            imageVector = visibilityIcon, 
+                            contentDescription = description
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -239,7 +310,10 @@ private fun SignupScreen(
 
             if (errorText != null) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(text = errorText!!, color = MaterialTheme.colorScheme.error)
+                Text(
+                    text = errorText!!, 
+                    color = MaterialTheme.colorScheme.error
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -260,11 +334,12 @@ private fun SignupScreen(
                 }
             }
 
-            TextButton(onClick = { onNavigateBackToLogin() }, modifier = Modifier.padding(top = 8.dp)) {
+            TextButton(
+                onClick = { onNavigateBackToLogin() }, 
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
                 Text("Already have an account? Sign in")
             }
         }
     }
 }
-
-

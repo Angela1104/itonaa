@@ -7,9 +7,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.Icons.Default
-import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -20,7 +20,6 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.views.overlay.Polygon
-import androidx.compose.foundation.background
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import androidx.compose.ui.viewinterop.AndroidView
 import com.bakhawone.thesis_bakhawone.GeoUtils
@@ -28,35 +27,24 @@ import com.bakhawone.thesis_bakhawone.PinnedLocation
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.*
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.unit.toSize
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Calendar
 import java.util.TimeZone
 
@@ -68,26 +56,24 @@ fun RecordScreen(
     onTabSelected: (Int) -> Unit,
     onLocationCleared: () -> Unit = {}
 ) {
-    // Show Barangay Trends screen
     BarangayTrendsScreen()
 }
 
 @Composable
 fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
     val db = remember { FirebaseFirestore.getInstance() }
     val userId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
     
     var monthDataList by remember { mutableStateOf<List<MonthData>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var pinnedLocationDocId by remember { mutableStateOf<String?>(null) }
-    
-    // Find pinned_location_id from Firebase and load data grouped by month
     LaunchedEffect(selectedLocation) {
         if (selectedLocation != null && userId.isNotEmpty()) {
             isLoading = true
             try {
-                // Query to find the pinned location document ID
                 val snapshot = db.collection("users").document(userId)
                     .collection("pinned_locations")
                     .whereEqualTo("name", selectedLocation.name)
@@ -99,15 +85,11 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                 
                 if (!snapshot.isEmpty) {
                     pinnedLocationDocId = snapshot.documents[0].id
-                    
-                    // Query trunk detections for this location
                     val trunkSnapshot = db.collection("trunk_detections")
                         .whereEqualTo("pinned_location_id", pinnedLocationDocId)
                         .whereEqualTo("is_rhizophora", 1)
                         .get()
                         .await()
-                    
-                    // Map to store month data: "2024-1" -> MonthData
                     val monthMap = mutableMapOf<String, MonthData>()
                     val monthNames = arrayOf(
                         "January", "February", "March", "April", "May", "June",
@@ -122,11 +104,7 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                             val calendar = Calendar.getInstance(TimeZone.getTimeZone("GMT+08:00")).apply { time = timestamp }
                             val year = calendar.get(Calendar.YEAR)
                             val month = calendar.get(Calendar.MONTH)
-                            
-                            // Create unique key for year-month
                             val key = "$year-$month"
-                            
-                            // Get or create MonthData for this month
                             val monthData = monthMap.getOrPut(key) {
                                 MonthData(
                                     monthName = monthNames[month],
@@ -136,8 +114,6 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                                     deadCount = 0
                                 )
                             }
-                            
-                            // Update counts
                             if (isAlive == 1L) {
                                 monthData.aliveCount++
                             } else {
@@ -145,8 +121,6 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                             }
                         }
                     }
-                    
-                    // Convert map to sorted list (by year, then month)
                     val allMonths = monthMap.values.sortedWith(
                         compareBy<MonthData> { it.year }.thenBy { it.month }
                     )
@@ -171,7 +145,7 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
+                    .padding(horizontal = if (isTablet) 24.dp else 16.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (isLoading) {
@@ -184,7 +158,6 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                     )
                 } else {
                     if (monthDataList.isNotEmpty()) {
-                        // Location info container
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -214,8 +187,6 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                                 )
                             }
                         }
-                        
-                        // Generate pie chart for each month found in Firebase
                         monthDataList.forEachIndexed { index, monthData ->
                             val monthTotal = monthData.aliveCount + monthData.deadCount
                             
@@ -241,38 +212,32 @@ fun DiagramsScreen(selectedLocation: PinnedLocation? = null) {
                                             color = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.padding(bottom = 16.dp)
                                         )
-                                        
-                                        // Pie Chart
                                         PieChart(
                                             aliveCount = monthData.aliveCount,
                                             deadCount = monthData.deadCount,
                                             modifier = Modifier
-                                                .size(250.dp)
+                                                .size(if (isTablet) 300.dp else 250.dp)
                                                 .padding(16.dp)
                                         )
                                         
                                         Spacer(modifier = Modifier.height(16.dp))
-                                        
-                                        // Legend
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceEvenly
                                         ) {
                                             LegendItem(
-                                                color = Color(0xFF4CAF50), // Green
+                                                color = Color(0xFF4CAF50),
                                                 label = "Alive",
                                                 count = monthData.aliveCount
                                             )
                                             LegendItem(
-                                                color = Color(0xFFF44336), // Red
+                                                color = Color(0xFFF44336),
                                                 label = "Dead",
                                                 count = monthData.deadCount
                                             )
                                         }
                                         
                                         Spacer(modifier = Modifier.height(8.dp))
-                                        
-                                        // Total count
                                         Text(
                                             "Total: $monthTotal trunks",
                                             style = MaterialTheme.typography.bodyMedium,
@@ -327,8 +292,8 @@ fun PieChart(
     val aliveAngle = if (total > 0) (aliveCount.toFloat() / total.toFloat()) * 360f else 0f
     val deadAngle = if (total > 0) (deadCount.toFloat() / total.toFloat()) * 360f else 0f
     
-    val aliveColor = Color(0xFF4CAF50) // Green
-    val deadColor = Color(0xFFF44336) // Red
+    val aliveColor = Color(0xFF4CAF50)
+    val deadColor = Color(0xFFF44336)
     
     Canvas(modifier = modifier) {
         val canvasSize = size.minDimension
@@ -337,9 +302,7 @@ fun PieChart(
         val topLeft = Offset(center.x - radius, center.y - radius)
         val chartSize = Size(radius * 2f, radius * 2f)
         
-        var startAngle = -90f // Start from top
-        
-        // Draw alive slice (green)
+        var startAngle = -90f
         if (aliveAngle > 0f) {
             drawArc(
                 color = aliveColor,
@@ -351,8 +314,6 @@ fun PieChart(
             )
             startAngle += aliveAngle
         }
-        
-        // Draw dead slice (red)
         if (deadAngle > 0f) {
             drawArc(
                 color = deadColor,
@@ -365,8 +326,6 @@ fun PieChart(
         }
     }
 }
-
-// Data class for month data (shared between DiagramsScreen and TrendChart)
 data class MonthData(
     val monthName: String,
     val year: Int,
@@ -390,8 +349,6 @@ fun TrendChart(
     val maxCount = monthDataList.maxOfOrNull { 
         maxOf(it.aliveCount, it.deadCount) 
     } ?: 100
-    
-    // Add padding for Y-axis labels
     val yAxisWidth = 50f
     val xAxisHeight = 60f
     val chartPadding = 20f
@@ -406,26 +363,20 @@ fun TrendChart(
         val chartEndX = width - chartPadding
         val chartEndY = height - xAxisHeight
         
-        val aliveColor = Color(0xFF4CAF50) // Green
-        val deadColor = Color(0xFFF44336) // Red
+        val aliveColor = Color(0xFF4CAF50)
+        val deadColor = Color(0xFFF44336)
         val gridColor = Color.Gray.copy(alpha = 0.3f)
         val axisColor = Color.Gray
-        
-        // Draw grid lines and Y-axis labels
         val ySteps = 5
         for (i in 0..ySteps) {
             val y = chartStartY + (chartHeight * i / ySteps)
             val value = maxCount - (maxCount * i / ySteps)
-            
-            // Draw grid line
             drawLine(
                 color = gridColor,
                 start = Offset(chartStartX, y),
                 end = Offset(chartEndX, y),
                 strokeWidth = 1f
             )
-            
-            // Draw Y-axis label
             drawIntoCanvas { canvas ->
                 val paint = android.graphics.Paint().apply {
                     color = android.graphics.Color.GRAY
@@ -436,14 +387,10 @@ fun TrendChart(
                 canvas.nativeCanvas.drawText("${value.toInt()}", chartStartX - 10, y + 10, paint)
             }
         }
-        
-        // Draw X-axis and labels
         val monthCount = monthDataList.size
         monthDataList.forEachIndexed { index, monthData ->
             val x = chartStartX + (chartWidth * index / (monthCount - 1).coerceAtLeast(1))
-            
-            // Draw X-axis label (abbreviated month name)
-            val monthLabel = monthData.monthName.take(3) // "Jan", "Feb", etc.
+            val monthLabel = monthData.monthName.take(3)
             drawIntoCanvas { canvas ->
                 val paint = android.graphics.Paint().apply {
                     color = android.graphics.Color.GRAY
@@ -454,8 +401,6 @@ fun TrendChart(
                 canvas.nativeCanvas.drawText(monthLabel, x, chartEndY + 40, paint)
             }
         }
-        
-        // Draw axis lines
         drawLine(
             color = axisColor,
             start = Offset(chartStartX, chartEndY),
@@ -468,10 +413,7 @@ fun TrendChart(
             end = Offset(chartStartX, chartEndY),
             strokeWidth = 2f
         )
-        
-        // Draw trend lines
         if (monthCount > 1) {
-            // Draw Alive trend line (green)
             val alivePoints = monthDataList.mapIndexed { index, monthData ->
                 val x = chartStartX + (chartWidth * index / (monthCount - 1))
                 val y = chartEndY - (chartHeight * monthData.aliveCount / maxCount)
@@ -485,7 +427,6 @@ fun TrendChart(
                     strokeWidth = 3f
                 )
             }
-            // Draw points for alive line
             alivePoints.forEach { point ->
                 drawCircle(
                     color = aliveColor,
@@ -493,8 +434,6 @@ fun TrendChart(
                     center = point
                 )
             }
-            
-            // Draw Dead trend line (red)
             val deadPoints = monthDataList.mapIndexed { index, monthData ->
                 val x = chartStartX + (chartWidth * index / (monthCount - 1))
                 val y = chartEndY - (chartHeight * monthData.deadCount / maxCount)
@@ -508,7 +447,6 @@ fun TrendChart(
                     strokeWidth = 3f
                 )
             }
-            // Draw points for dead line
             deadPoints.forEach { point ->
                 drawCircle(
                     color = deadColor,
@@ -517,7 +455,6 @@ fun TrendChart(
                 )
             }
         } else {
-            // Single point - draw as bar or point
             val monthData = monthDataList[0]
             val x = chartStartX + (chartWidth / 2f)
             val aliveY = chartEndY - (chartHeight * monthData.aliveCount / maxCount)
@@ -568,13 +505,11 @@ fun LegendItem(
         }
     }
 }
-
-// Data class for trunk detection in reports
 data class TrunkReportData(
     val trunkId: String,
-    val status: String, // "Alive" or "Dead"
+    val status: String,
     val dbhCm: Double,
-    val basalArea: Double // calculated: 0.00007854 * DBH
+    val basalArea: Double
 )
 
 @Composable
@@ -583,10 +518,10 @@ fun ReportsScreen(
     selectedLocation: PinnedLocation? = null
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
     val db = remember { FirebaseFirestore.getInstance() }
     val userId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
-    
-    // Month names helper to map to indices
     val monthNames = remember {
         arrayOf(
             "January", "February", "March", "April", "May", "June",
@@ -597,16 +532,13 @@ fun ReportsScreen(
     var monthTrunkMap by remember { mutableStateOf<Map<String, List<TrunkReportData>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(false) }
     var pinnedLocationDocId by remember { mutableStateOf<String?>(null) }
-    var expandedMonths by remember { mutableStateOf<Set<String>>(emptySet()) } // Track which months are expanded
+    var expandedMonths by remember { mutableStateOf<Set<String>>(emptySet()) }
     var lastTapTime by remember { mutableStateOf(0L) }
     var lastTappedMonth by remember { mutableStateOf<String?>(null) }
-    
-    // Load trunk data grouped by month
     LaunchedEffect(selectedLocation) {
         if (selectedLocation != null && userId.isNotEmpty()) {
             isLoading = true
             try {
-                // Query to find the pinned location document ID
                 val snapshot = db.collection("users").document(userId)
                     .collection("pinned_locations")
                     .whereEqualTo("name", selectedLocation.name)
@@ -618,15 +550,11 @@ fun ReportsScreen(
                 
                 if (!snapshot.isEmpty) {
                     pinnedLocationDocId = snapshot.documents[0].id
-                    
-                    // Query trunk detections for this location
                     val trunkSnapshot = db.collection("trunk_detections")
                         .whereEqualTo("pinned_location_id", pinnedLocationDocId)
                         .whereEqualTo("is_rhizophora", 1)
                         .get()
                         .await()
-                    
-                    // Group trunk detections by month
                     val map = mutableMapOf<String, MutableList<TrunkReportData>>()
                     
                     trunkSnapshot.documents.forEach { doc ->
@@ -642,8 +570,6 @@ fun ReportsScreen(
                             val isAlive = doc.getLong("is_alive") ?: 0L
                             val status = if (isAlive == 1L) "Alive" else "Dead"
                             val dbhCm = doc.getDouble("dbh_cm") ?: 0.0
-                            
-                            // Calculate basal area: 0.00007854 * DBH
                             val basalArea = 0.00007854 * dbhCm
                             
                             val trunkData = TrunkReportData(
@@ -707,9 +633,8 @@ fun ReportsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(16.dp)
+                .padding(horizontal = if (isTablet) 24.dp else 16.dp, vertical = 16.dp)
         ) {
-            // Location info container
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -739,8 +664,6 @@ fun ReportsScreen(
                     )
                 }
             }
-            
-            // Display report for each month
             run {
                 val sortedEntries = monthTrunkMap.entries.sortedWith(
                     compareByDescending<Map.Entry<String, List<TrunkReportData>>> {
@@ -764,14 +687,11 @@ fun ReportsScreen(
                                 .fillMaxWidth()
                                 .padding(bottom = 24.dp)
                                 .onGloballyPositioned { coords ->
-                                    // Track the top Y position of this month card within the scrollable Column
                                     cardTopPositions[monthKey] = coords.positionInParent().y
                                 }
                                 .clickable {
                                     val currentTime = System.currentTimeMillis()
-                                    // Check if this is a double-tap (within 300ms and same month)
                                     if (currentTime - lastTapTime < 300 && lastTappedMonth == monthKey) {
-                                        // Double-tap detected - toggle expanded state
                                         val wasExpanded = isExpanded
                                         val beforeCardTop = cardTopPositions[monthKey] ?: 0f
                                         val beforeScroll = scrollState.value.toFloat()
@@ -782,11 +702,9 @@ fun ReportsScreen(
                                         }
                                         lastTapTime = 0
                                         lastTappedMonth = null
-                                        
-                                        // If collapsing, maintain scroll position to keep this report visible
                                         if (wasExpanded) {
                                             scope.launch {
-                                                delay(150) // Wait for UI update and layout pass
+                                                delay(150)
                                                 val afterCardTop = cardTopPositions[monthKey] ?: beforeCardTop
                                                 val deltaTop = afterCardTop - beforeCardTop
                                                 val targetScroll = (beforeScroll + deltaTop).coerceAtLeast(0f)
@@ -794,7 +712,6 @@ fun ReportsScreen(
                                             }
                                         }
                                     } else {
-                                        // Single tap - record for potential double-tap
                                         lastTapTime = currentTime
                                         lastTappedMonth = monthKey
                                     }
@@ -804,7 +721,6 @@ fun ReportsScreen(
                             Column(
                                 modifier = Modifier.padding(16.dp)
                             ) {
-                            // Date
                                 Text(
                                     "Date: $monthName $year",
                                     style = MaterialTheme.typography.titleLarge,
@@ -812,13 +728,9 @@ fun ReportsScreen(
                                 )
 
                                 Spacer(modifier = Modifier.height(8.dp))
-                                
-                            // Divider
                             Divider(
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
-                            
-                            // Table Header
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -854,13 +766,9 @@ fun ReportsScreen(
                                     textAlign = TextAlign.Start
                                 )
                             }
-                            
-                            // Divider
                             Divider(
                                     modifier = Modifier.padding(bottom = 8.dp)
                                 )
-
-                            // Table Rows (limited to 5 or all if expanded)
                             displayedTrunks.forEachIndexed { index, trunk ->
                                 Row(
                                     modifier = Modifier
@@ -869,33 +777,39 @@ fun ReportsScreen(
                                     horizontalArrangement = Arrangement.Start
                                 ) {
                                     Text(
-                                        trunk.trunkId.take(12), // Show first 12 chars of ID
+                                        trunk.trunkId.take(if (isTablet) 16 else 12),
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.weight(1f),
                                         textAlign = TextAlign.Start,
-                                        fontSize = 12.sp
+                                        fontSize = if (isTablet) 13.sp else 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         trunk.status,
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.weight(1f),
                                         textAlign = TextAlign.Start,
-                                        fontSize = 12.sp,
-                                        color = if (trunk.status == "Alive") Color(0xFF4CAF50) else Color(0xFFF44336)
+                                        fontSize = if (isTablet) 13.sp else 12.sp,
+                                        color = if (trunk.status == "Alive") Color(0xFF4CAF50) else Color(0xFFF44336),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         String.format("%.1f", trunk.dbhCm),
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.weight(1f),
                                         textAlign = TextAlign.Start,
-                                        fontSize = 12.sp
+                                        fontSize = if (isTablet) 13.sp else 12.sp
                                     )
                                     Text(
                                         String.format("%.6f", trunk.basalArea),
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.weight(1f),
                                         textAlign = TextAlign.Start,
-                                        fontSize = 12.sp
+                                        fontSize = if (isTablet) 13.sp else 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                                 
@@ -906,13 +820,9 @@ fun ReportsScreen(
                                     )
                                 }
                             }
-                            
-                            // Divider
                             Divider(
                                 modifier = Modifier.padding(vertical = 8.dp)
                                 )
-
-                            // Basal Area per Acre with Expand/Collapse Icon
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -926,8 +836,6 @@ fun ReportsScreen(
                                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
                                     )
-                                
-                                // Expand/Collapse Icon (only show if there are more than 5 trunks)
                                 if (hasMore) {
                                     IconButton(
                                         onClick = {
@@ -939,11 +847,9 @@ fun ReportsScreen(
                                             } else {
                                                 expandedMonths + monthKey
                                             }
-                                            
-                                            // If collapsing, maintain scroll position to keep this report visible
                                             if (wasExpanded) {
                                                 scope.launch {
-                                                    delay(150) // Wait for UI update and layout pass
+                                                    delay(150)
                                                     val afterCardTop = cardTopPositions[monthKey] ?: beforeCardTop
                                                     val deltaTop = afterCardTop - beforeCardTop
                                                     val targetScroll = (beforeScroll + deltaTop).coerceAtLeast(0f)
@@ -967,8 +873,6 @@ fun ReportsScreen(
 }
         }
     }
-
-// Data for GIS rendering
 data class LocationWithStatus(
     val location: PinnedLocation,
     val pinnedLocationDocId: String,
@@ -978,6 +882,8 @@ data class LocationWithStatus(
 
 @Composable
 fun GISScreen(selectedLocation: PinnedLocation? = null) {
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
     val db = remember { FirebaseFirestore.getInstance() }
 
     var locationsWithStatus by remember { mutableStateOf<List<LocationWithStatus>>(emptyList()) }
@@ -1002,8 +908,6 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
                 if (loc.latitude == 0.0 && loc.longitude == 0.0) continue
 
                 val pinnedLocationDocId = pinnedDoc.id
-
-                // Global detections for this location (no user filter)
                 val trunks = db.collection("trunk_detections")
                     .whereEqualTo("pinned_location_id", pinnedLocationDocId)
                     .whereEqualTo("is_rhizophora", 1)
@@ -1011,8 +915,6 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
                     .await()
 
                 if (trunks.isEmpty) continue
-
-                // Most recent month window (UTC+8)
                 var latestTs = Long.MIN_VALUE
                 trunks.documents.forEach { d ->
                     val ts = d.getTimestamp("timestamp_firestore")?.toDate()?.time
@@ -1058,10 +960,10 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
 
                 val pct = if (total > 0) (alive.toDouble() / total.toDouble()) * 100.0 else 0.0
                 val color = when {
-                    pct >= 80.0 -> 0x804CAF50.toInt() // Green
-                    pct >= 51.0 -> 0x8098FB98.toInt() // Pale Green
-                    pct >= 41.0 -> 0x80FFEB3B.toInt() // Yellow
-                    else -> 0x80F44336.toInt()       // Red
+                    pct >= 80.0 -> 0x804CAF50.toInt()
+                    pct >= 51.0 -> 0x8098FB98.toInt()
+                    pct >= 41.0 -> 0x80FFEB3B.toInt()
+                    else -> 0x80F44336.toInt()
                 }
 
                 result.add(
@@ -1100,10 +1002,7 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
             },
             modifier = Modifier.fillMaxSize(),
             update = { view ->
-                // Clear previous polygons
                 view.overlays.removeAll { it is org.osmdroid.views.overlay.Polygon }
-
-                // Draw circles
                 locationsWithStatus.forEach { ls ->
                     val center = GeoPoint(ls.location.latitude, ls.location.longitude)
                     val radius = GeoUtils.calculateRadiusForArea(1000.0)
@@ -1114,8 +1013,6 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
                     circle.title = "${ls.location.name} (${String.format("%.1f", ls.alivePercentage)}% alive)"
                     view.overlays.add(circle)
                 }
-
-                // Center to selected location if provided
                 selectedLocation?.let { sel ->
                     val match = locationsWithStatus.find { it.location.name == sel.name }
                     if (match != null) {
@@ -1130,22 +1027,26 @@ fun GISScreen(selectedLocation: PinnedLocation? = null) {
                 view.overlays.clear()
             }
         )
-
-        // Legend with requested format (compact box)
         Card(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(start = 8.dp, top = 8.dp),
+                .padding(start = if (isTablet) 12.dp else 8.dp, top = if (isTablet) 12.dp else 8.dp)
+                .widthIn(max = if (isTablet) 350.dp else 280.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
             )
         ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .padding(horizontal = if (isTablet) 12.dp else 8.dp, vertical = if (isTablet) 8.dp else 6.dp)
             ) {
-                Text("Status:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Status:", 
+                    style = MaterialTheme.typography.titleSmall, 
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (isTablet) 16.sp else 14.sp
+                )
+                Spacer(modifier = Modifier.height(if (isTablet) 6.dp else 4.dp))
 
                 LegendLine(color = Color(0xFF4CAF50), text = "≥ 80.0% = (Very Healthy)")
                 LegendLine(color = Color(0xFF98FB98), text = "≥ 51.0% and < 80.0% = (Healthy)")
@@ -1195,25 +1096,451 @@ private fun LegendLine(color: Color, text: String) {
         Text(text, style = MaterialTheme.typography.bodySmall)
     }
 }
-
-// Data class for barangay trend data
 data class BarangayMonthData(
     val barangay: String,
-    val monthKey: String, // "YYYY-MM"
-    val monthName: String, // "January 2024"
+    val monthKey: String,
+    val monthName: String,
     val aliveCount: Int,
     val deadCount: Int
 )
+data class BarangaySummary(
+    val barangay: String,
+    val totalTrunks: Int,
+    val aliveCount: Int,
+    val deadCount: Int,
+    val healthPercentage: Double,
+    val status: String,
+    val trend: String
+)
+@Composable
+fun SummaryStatsCards(
+    totalTrunks: Int,
+    overallHealthPercentage: Double,
+    barangayCount: Int,
+    trendIndicator: String,
+    isTablet: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(if (isTablet) 16.dp else 12.dp)
+    ) {
+        SummaryCard(
+            title = "Total Trunks",
+            value = totalTrunks.toString(),
+            icon = Icons.Filled.Park,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f)
+        )
+        SummaryCard(
+            title = "Health %",
+            value = String.format("%.1f%%", overallHealthPercentage),
+            icon = Icons.Filled.Favorite,
+            color = when {
+                overallHealthPercentage >= 80.0 -> Color(0xFF4CAF50)
+                overallHealthPercentage >= 51.0 -> Color(0xFF98FB98)
+                overallHealthPercentage >= 41.0 -> Color(0xFFFFEB3B)
+                else -> Color(0xFFF44336)
+            },
+            modifier = Modifier.weight(1f)
+        )
+        SummaryCard(
+            title = "Barangays",
+            value = barangayCount.toString(),
+            icon = Icons.Filled.LocationCity,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.weight(1f)
+        )
+        SummaryCard(
+            title = "Trend",
+            value = when (trendIndicator) {
+                "improving" -> "↑"
+                "declining" -> "↓"
+                else -> "→"
+            },
+            icon = when (trendIndicator) {
+                "improving" -> Icons.Filled.TrendingUp
+                "declining" -> Icons.Filled.TrendingDown
+                else -> Icons.Filled.TrendingFlat
+            },
+            color = when (trendIndicator) {
+                "improving" -> Color(0xFF4CAF50)
+                "declining" -> Color(0xFFF44336)
+                else -> Color(0xFF9E9E9E)
+            },
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
 
+@Composable
+fun SummaryCard(
+    title: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    
+    Card(
+        modifier = modifier,
+        elevation = CardDefaults.cardElevation(4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(if (isTablet) 20.dp else 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = color,
+                modifier = Modifier.size(if (isTablet) 40.dp else 32.dp)
+            )
+            Spacer(modifier = Modifier.height(if (isTablet) 12.dp else 8.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = color,
+                fontSize = if (isTablet) 24.sp else 20.sp
+            )
+            Spacer(modifier = Modifier.height(if (isTablet) 6.dp else 4.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = if (isTablet) 13.sp else 12.sp
+            )
+        }
+    }
+}
+@Composable
+fun MultiBarangayTrendChart(
+    barangayMonthData: Map<String, List<BarangayMonthData>>,
+    selectedBarangays: Set<String>,
+    modifier: Modifier = Modifier
+) {
+    if (barangayMonthData.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No data available", color = MaterialTheme.colorScheme.secondary)
+        }
+        return
+    }
+    
+    if (selectedBarangays.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Select barangays to visualize", color = MaterialTheme.colorScheme.secondary)
+        }
+        return
+    }
+    
+    val barangaysToShow = selectedBarangays
+    val allMonthKeys = barangaysToShow
+        .flatMap { barangay -> barangayMonthData[barangay]?.map { it.monthKey } ?: emptyList() }
+        .distinct()
+        .sorted()
+    
+    if (allMonthKeys.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No data available", color = MaterialTheme.colorScheme.secondary)
+        }
+        return
+    }
+    val maxCount = barangaysToShow
+        .flatMap { barangay -> barangayMonthData[barangay]?.map { it.aliveCount + it.deadCount } ?: emptyList() }
+        .maxOrNull() ?: 100
+    
+    val yAxisWidth = 50f
+    val xAxisHeight = 60f
+    val chartPadding = 20f
+    
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val chartWidth = width - yAxisWidth - chartPadding
+        val chartHeight = height - xAxisHeight - chartPadding
+        val chartStartX = yAxisWidth + chartPadding
+        val chartStartY = chartPadding
+        val chartEndX = width - chartPadding
+        val chartEndY = height - xAxisHeight
+        
+        val gridColor = Color.Gray.copy(alpha = 0.3f)
+        val axisColor = Color.Gray
+        val ySteps = 5
+        for (i in 0..ySteps) {
+            val y = chartStartY + (chartHeight * i / ySteps)
+            val value = maxCount - (maxCount * i / ySteps)
+            
+            drawLine(
+                color = gridColor,
+                start = Offset(chartStartX, y),
+                end = Offset(chartEndX, y),
+                strokeWidth = 1f
+            )
+            
+            drawIntoCanvas { canvas ->
+                val paint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.GRAY
+                    textSize = 28f
+                    textAlign = android.graphics.Paint.Align.RIGHT
+                    isAntiAlias = true
+                }
+                canvas.nativeCanvas.drawText("${value.toInt()}", chartStartX - 10, y + 10, paint)
+            }
+        }
+        val monthCount = allMonthKeys.size
+        allMonthKeys.forEachIndexed { index, monthKey ->
+            val x = chartStartX + (chartWidth * index / (monthCount - 1).coerceAtLeast(1))
+            
+            val parts = monthKey.split("-")
+            val monthIndex = parts.getOrNull(1)?.toIntOrNull()?.minus(1) ?: 0
+            val monthNames = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+            val monthLabel = if (monthIndex in 0..11) monthNames[monthIndex] else monthKey
+            
+            drawIntoCanvas { canvas ->
+                val paint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.GRAY
+                    textSize = 24f
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    isAntiAlias = true
+                }
+                canvas.nativeCanvas.drawText(monthLabel, x, chartEndY + 40, paint)
+            }
+        }
+        drawLine(
+            color = axisColor,
+            start = Offset(chartStartX, chartEndY),
+            end = Offset(chartEndX, chartEndY),
+            strokeWidth = 2f
+        )
+        drawLine(
+            color = axisColor,
+            start = Offset(chartStartX, chartStartY),
+            end = Offset(chartStartX, chartEndY),
+            strokeWidth = 2f
+        )
+        val colors = listOf(
+            Color(0xFF2196F3), Color(0xFF9C27B0), Color(0xFFFF9800),
+            Color(0xFF00BCD4), Color(0xFF8BC34A), Color(0xFFE91E63),
+            Color(0xFF3F51B5), Color(0xFF009688), Color(0xFFFFC107)
+        )
+        
+        barangaysToShow.forEachIndexed { barangayIndex, barangay ->
+            val color = colors[barangayIndex % colors.size]
+            val data = barangayMonthData[barangay] ?: return@forEachIndexed
+            val points = allMonthKeys.mapIndexed { monthIndex, monthKey ->
+                val monthData = data.find { it.monthKey == monthKey }
+                val total = (monthData?.aliveCount ?: 0) + (monthData?.deadCount ?: 0)
+                val x = chartStartX + (chartWidth * monthIndex / (monthCount - 1).coerceAtLeast(1))
+                val y = chartEndY - (chartHeight * total / maxCount)
+                Offset(x, y)
+            }
+            if (points.size > 1) {
+                for (i in 0 until points.size - 1) {
+                    drawLine(
+                        color = color,
+                        start = points[i],
+                        end = points[i + 1],
+                        strokeWidth = 3f
+                    )
+                }
+            }
+            points.forEach { point ->
+                drawCircle(
+                    color = color,
+                    radius = 5f,
+                    center = point
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickStatsTable(
+    barangaySummaries: List<BarangaySummary>,
+    selectedBarangays: Set<String>,
+    modifier: Modifier = Modifier
+) {
+    val filteredSummaries = if (selectedBarangays.isEmpty()) {
+        barangaySummaries
+    } else {
+        barangaySummaries.filter { it.barangay in selectedBarangays }
+    }
+    
+    Card(
+        modifier = modifier,
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Barangay Statistics",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            
+            if (filteredSummaries.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (selectedBarangays.isEmpty()) {
+                            "No barangay data available"
+                        } else {
+                            "No data for selected barangay(s)"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Barangay",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(2f)
+                    )
+                    Text(
+                        "Total",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        "% Alive",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        "Status",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1.5f),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        "Trend",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center
+                    )
+                }
+                
+                Divider()
+                
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    filteredSummaries.forEachIndexed { index, summary ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                summary.barangay,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(2f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                summary.totalTrunks.toString(),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                String.format("%.1f%%", summary.healthPercentage),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                summary.status,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = when (summary.status) {
+                                    "Very Healthy" -> Color(0xFF4CAF50)
+                                    "Healthy" -> Color(0xFF98FB98)
+                                    "Degraded" -> Color(0xFFFFEB3B)
+                                    else -> Color(0xFFF44336)
+                                },
+                                modifier = Modifier.weight(1.5f),
+                                textAlign = TextAlign.Center
+                            )
+                            Icon(
+                                imageVector = when (summary.trend) {
+                                    "improving" -> Icons.Filled.TrendingUp
+                                    "declining" -> Icons.Filled.TrendingDown
+                                    else -> Icons.Filled.TrendingFlat
+                                },
+                                contentDescription = summary.trend,
+                                tint = when (summary.trend) {
+                                    "improving" -> Color(0xFF4CAF50)
+                                    "declining" -> Color(0xFFF44336)
+                                    else -> Color(0xFF9E9E9E)
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .size(20.dp)
+                            )
+                        }
+                        if (index < filteredSummaries.size - 1) {
+                            Divider(thickness = 0.5.dp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BarangayTrendsScreen() {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
     val db = remember { FirebaseFirestore.getInstance() }
     
     var barangayMonthData by remember { mutableStateOf<Map<String, List<BarangayMonthData>>>(emptyMap()) }
     var availableBarangays by remember { mutableStateOf<List<String>>(emptyList()) }
-    var selectedBarangay by remember { mutableStateOf<String?>(null) }
+    var selectedBarangays by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isLoading by remember { mutableStateOf(false) }
+    var barangaySummaries by remember { mutableStateOf<List<BarangaySummary>>(emptyList()) }
     
     val monthNames = remember {
         arrayOf(
@@ -1221,13 +1548,10 @@ fun BarangayTrendsScreen() {
             "July", "August", "September", "October", "November", "December"
         )
     }
-    
-    // Load trunk detections grouped by barangay and month
     LaunchedEffect(Unit) {
         isLoading = true
         try {
-            // First, load all pinned locations to create a map of location ID -> barangay/address
-            val locationMap = mutableMapOf<String, Pair<String?, String>>() // locationId -> (barangay, address)
+            val locationMap = mutableMapOf<String, Pair<String?, String>>()
             try {
                 val allLocations = db.collectionGroup("pinned_locations").get().await()
                 allLocations.documents.forEach { locationDoc ->
@@ -1239,74 +1563,52 @@ fun BarangayTrendsScreen() {
             } catch (e: Exception) {
                 android.util.Log.e("BarangayTrendsScreen", "Error loading locations", e)
             }
-            
-            // Query all trunk detections
             val trunkSnapshot = db.collection("trunk_detections")
                 .whereEqualTo("is_rhizophora", 1)
                 .get()
                 .await()
-            
-            // Map to store barangay -> month -> counts
             val barangayDataMap = mutableMapOf<String, MutableMap<String, Pair<Int, Int>>>()
-            
-            // Process each trunk detection
             trunkSnapshot.documents.forEach { doc ->
                 val barangay = doc.getString("barangay")
                 val isAlive = doc.getLong("is_alive") ?: 0
                 val timestamp = doc.getTimestamp("timestamp_firestore")
                 val pinnedLocationId = doc.getString("pinned_location_id")
-                
-                // Skip if no timestamp
                 if (timestamp == null) return@forEach
-                
-                // Get barangay from detection or pinned location
                 var finalBarangay = barangay
                 var isPuertoPrincesa = false
                 
                 if (finalBarangay == null && pinnedLocationId != null) {
-                    // Try to get barangay from pinned location map
                     val locationInfo = locationMap[pinnedLocationId]
                     if (locationInfo != null) {
                         val (locationBarangay, address) = locationInfo
                         finalBarangay = locationBarangay
-                        
-                        // Extract barangay from address if not in field
                         if (finalBarangay == null) {
                             finalBarangay = extractBarangayFromAddress(address)
                         }
-                        
-                        // Check if in Puerto Princesa City
                         isPuertoPrincesa = address.contains("Puerto Princesa", ignoreCase = true) ||
                                          address.contains("Puerto Princesa City", ignoreCase = true)
                     }
                 } else if (pinnedLocationId != null) {
-                    // Check if in Puerto Princesa City using location map
                     val locationInfo = locationMap[pinnedLocationId]
                     if (locationInfo != null) {
                         val address = locationInfo.second
                         isPuertoPrincesa = address.contains("Puerto Princesa", ignoreCase = true) ||
                                          address.contains("Puerto Princesa City", ignoreCase = true)
                     } else {
-                        // Assume Puerto Princesa if we can't check
                         isPuertoPrincesa = true
                     }
                 } else {
-                    // Assume Puerto Princesa if no location ID
                     isPuertoPrincesa = true
                 }
                 
                 if (!isPuertoPrincesa || finalBarangay == null) {
                     return@forEach
                 }
-                
-                // Get month from timestamp
                 val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
                 calendar.time = timestamp.toDate()
                 val year = calendar.get(Calendar.YEAR)
                 val month = calendar.get(Calendar.MONTH)
                 val monthKey = "$year-${String.format("%02d", month + 1)}"
-                
-                // Update counts
                 val dataMap = barangayDataMap.getOrPut(finalBarangay) { mutableMapOf() }
                 val (alive, dead) = dataMap.getOrPut(monthKey) { Pair(0, 0) }
                 dataMap[monthKey] = if (isAlive == 1L) {
@@ -1315,8 +1617,6 @@ fun BarangayTrendsScreen() {
                     Pair(alive, dead + 1)
                 }
             }
-            
-            // Convert to BarangayMonthData format
             val result = barangayDataMap.mapValues { (barangay, monthMap) ->
                 monthMap.map { (monthKey, counts) ->
                     val parts = monthKey.split("-")
@@ -1339,40 +1639,130 @@ fun BarangayTrendsScreen() {
             
             barangayMonthData = result
             availableBarangays = result.keys.sorted()
-            if (availableBarangays.isNotEmpty() && selectedBarangay == null) {
-                selectedBarangay = availableBarangays[0]
-            }
+            val summaries = result.map { (barangay, monthDataList) ->
+                val totalAlive = monthDataList.sumOf { it.aliveCount }
+                val totalDead = monthDataList.sumOf { it.deadCount }
+                val totalTrunks = totalAlive + totalDead
+                val healthPercentage = if (totalTrunks > 0) {
+                    (totalAlive.toDouble() / totalTrunks.toDouble()) * 100.0
+                } else {
+                    0.0
+                }
+                val status = when {
+                    healthPercentage >= 80.0 -> "Very Healthy"
+                    healthPercentage >= 51.0 -> "Healthy"
+                    healthPercentage >= 41.0 -> "Degraded"
+                    else -> "Very Degraded"
+                }
+                val sortedData = monthDataList.sortedBy { it.monthKey }
+                val trend = if (sortedData.size >= 2) {
+                    val midPoint = sortedData.size / 2
+                    val firstHalf = sortedData.take(midPoint)
+                    val secondHalf = sortedData.drop(midPoint)
+                    
+                    val firstHalfAlive = firstHalf.sumOf { it.aliveCount }
+                    val firstHalfTotal = firstHalf.sumOf { it.aliveCount + it.deadCount }
+                    val secondHalfAlive = secondHalf.sumOf { it.aliveCount }
+                    val secondHalfTotal = secondHalf.sumOf { it.aliveCount + it.deadCount }
+                    
+                    val firstHalfPct = if (firstHalfTotal > 0) (firstHalfAlive.toDouble() / firstHalfTotal) * 100.0 else 0.0
+                    val secondHalfPct = if (secondHalfTotal > 0) (secondHalfAlive.toDouble() / secondHalfTotal) * 100.0 else 0.0
+                    
+                    when {
+                        secondHalfPct > firstHalfPct + 2.0 -> "improving"
+                        secondHalfPct < firstHalfPct - 2.0 -> "declining"
+                        else -> "stable"
+                    }
+                } else {
+                    "stable"
+                }
+                
+                BarangaySummary(
+                    barangay = barangay,
+                    totalTrunks = totalTrunks,
+                    aliveCount = totalAlive,
+                    deadCount = totalDead,
+                    healthPercentage = healthPercentage,
+                    status = status,
+                    trend = trend
+                )
+            }.sortedByDescending { it.healthPercentage }
+            
+            barangaySummaries = summaries
         } catch (e: Exception) {
             android.util.Log.e("BarangayTrendsScreen", "Error loading data", e)
         } finally {
             isLoading = false
         }
     }
+    val totalTrunks = barangaySummaries.sumOf { it.totalTrunks }
+    val totalAlive = barangaySummaries.sumOf { it.aliveCount }
+    val overallHealthPercentage = if (totalTrunks > 0) {
+        (totalAlive.toDouble() / totalTrunks.toDouble()) * 100.0
+    } else {
+        0.0
+    }
+    val overallTrend = if (barangaySummaries.isNotEmpty()) {
+        val improving = barangaySummaries.count { it.trend == "improving" }
+        val declining = barangaySummaries.count { it.trend == "declining" }
+        when {
+            improving > declining -> "improving"
+            declining > improving -> "declining"
+            else -> "stable"
+        }
+    } else {
+        "stable"
+    }
     
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
-    ) {
-        // Header
-        Text(
-            text = "Trends Over Time by Barangay",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        Text(
-            text = "Puerto Princesa City",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-        
-        // Barangay filter dropdown
-        if (availableBarangays.isNotEmpty()) {
-            var expanded by remember { mutableStateOf(false) }
-            
+    if (isLoading) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                Text("Loading trends...", color = MaterialTheme.colorScheme.secondary)
+            }
+        }
+    } else if (availableBarangays.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "No detected trees found in Puerto Princesa City",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.secondary,
+                textAlign = TextAlign.Center
+            )
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = if (isTablet) 24.dp else 16.dp, vertical = 16.dp)
+        ) {
+            Text(
+                text = "Barangay Trends Dashboard",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            Text(
+                text = "Puerto Princesa City",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            SummaryStatsCards(
+                totalTrunks = totalTrunks,
+                overallHealthPercentage = overallHealthPercentage,
+                barangayCount = availableBarangays.size,
+                trendIndicator = overallTrend,
+                isTablet = isTablet,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1380,147 +1770,93 @@ fun BarangayTrendsScreen() {
                 elevation = CardDefaults.cardElevation(4.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Select Barangay",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    Box {
-                        OutlinedButton(
-                            onClick = { expanded = true },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = selectedBarangay ?: "Select a barangay",
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.Start
-                            )
-                            Icon(
-                                imageVector = Icons.Filled.ArrowDropDown,
-                                contentDescription = "Dropdown"
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = expanded,
-                            onDismissRequest = { expanded = false }
-                        ) {
-                            availableBarangays.forEach { barangay ->
-                                DropdownMenuItem(
-                                    text = { Text(barangay) },
-                                    onClick = {
-                                        selectedBarangay = barangay
-                                        expanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
-                    Text("Loading trends...", color = MaterialTheme.colorScheme.secondary)
-                }
-            }
-        } else if (availableBarangays.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "No detected trees found in Puerto Princesa City",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.secondary,
-                    textAlign = TextAlign.Center
-                )
-            }
-        } else {
-            // Display trends for selected barangay
-            selectedBarangay?.let { barangay ->
-                val monthDataList = barangayMonthData[barangay]?.map { data ->
-                    // Extract year and month from monthKey (format: "YYYY-MM")
-                    val parts = data.monthKey.split("-")
-                    val year = parts[0].toIntOrNull() ?: 2024
-                    val month = parts.getOrNull(1)?.toIntOrNull() ?: 1
-                    MonthData(
-                        monthName = data.monthName,
-                        year = year,
-                        month = month,
-                        aliveCount = data.aliveCount,
-                        deadCount = data.deadCount
-                    )
-                } ?: emptyList()
-                
-                if (monthDataList.isNotEmpty()) {
-                    Card(
+                    MultiBarangayTrendChart(
+                        barangayMonthData = barangayMonthData,
+                        selectedBarangays = selectedBarangays,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 16.dp),
-                        elevation = CardDefaults.cardElevation(4.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = barangay,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            )
-                            
-                            // Trend chart
-                            TrendChart(
-                                monthDataList = monthDataList,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(300.dp)
-                                    .padding(vertical = 16.dp)
-                            )
-                            
-                            // Legend
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 16.dp),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                val totalAlive = monthDataList.sumOf { it.aliveCount }
-                                val totalDead = monthDataList.sumOf { it.deadCount }
-                                LegendItem(
-                                    color = Color(0xFF4CAF50),
-                                    label = "Alive",
-                                    count = totalAlive
-                                )
-                                Spacer(modifier = Modifier.width(16.dp))
-                                LegendItem(
-                                    color = Color(0xFFF44336),
-                                    label = "Dead",
-                                    count = totalDead
-                                )
+                            .height(if (isTablet) 400.dp else 300.dp)
+                    )
+                    if (availableBarangays.isNotEmpty()) {
+                        val barangayColors = listOf(
+                            Color(0xFF2196F3), Color(0xFF9C27B0), Color(0xFFFF9800),
+                            Color(0xFF00BCD4), Color(0xFF8BC34A), Color(0xFFE91E63),
+                            Color(0xFF3F51B5), Color(0xFF009688), Color(0xFFFFC107)
+                        )
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = if (isTablet) 200.dp else 150.dp)
+                        ) {
+                            items(availableBarangays.chunked(if (isTablet) 4 else 3).size) { rowIndex ->
+                                val row = availableBarangays.chunked(if (isTablet) 4 else 3)[rowIndex]
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    row.forEach { barangay ->
+                                        val barangayIndex = availableBarangays.indexOf(barangay)
+                                        val barangayColor = barangayColors[barangayIndex % barangayColors.size]
+                                        
+                                        FilterChip(
+                                            selected = selectedBarangays.contains(barangay),
+                                            onClick = {
+                                                selectedBarangays = if (selectedBarangays.contains(barangay)) {
+                                                    selectedBarangays - barangay
+                                                } else {
+                                                    if (selectedBarangays.size < 10) {
+                                                        selectedBarangays + barangay
+                                                    } else {
+                                                        selectedBarangays
+                                                    }
+                                                }
+                                            },
+                                            label = { 
+                                                Text(
+                                                    barangay, 
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = barangayColor,
+                                                    fontWeight = if (selectedBarangays.contains(barangay)) FontWeight.Bold else FontWeight.Normal,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                ) 
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            enabled = selectedBarangays.contains(barangay) || selectedBarangays.size < 10
+                                        )
+                                    }
+                                    repeat((if (isTablet) 4 else 3) - row.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
                             }
                         }
+                        if (selectedBarangays.size >= 10) {
+                            Text(
+                                text = "Maximum 10 barangays can be selected for comparison",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                     }
-                } else {
-                    Text(
-                        "No data available for $barangay",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
                 }
             }
+            
+            QuickStatsTable(
+                barangaySummaries = barangaySummaries,
+                selectedBarangays = selectedBarangays,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
 
-// Helper function to extract barangay from address string
 private fun extractBarangayFromAddress(address: String): String? {
-    // Try to find "Barangay" or "Brgy" in the address
     val patterns = listOf(
         Regex("Barangay\\s+([^,]+)", RegexOption.IGNORE_CASE),
         Regex("Brgy\\.?\\s+([^,]+)", RegexOption.IGNORE_CASE),

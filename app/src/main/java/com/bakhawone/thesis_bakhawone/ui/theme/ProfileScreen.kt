@@ -30,8 +30,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.asImageBitmap
@@ -53,6 +56,9 @@ data class UserData(
 @Composable
 fun ProfileScreen() {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
 
@@ -62,33 +68,27 @@ fun ProfileScreen() {
     var tempOrganization by remember { mutableStateOf("") }
     var isSavingPhoto by remember { mutableStateOf(false) }
 
-    // Determine which permission to request based on Android version
     val photoPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_IMAGES
     } else {
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
 
-    // Image picker launcher
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         val currentUser = auth.currentUser
         if (uri != null && currentUser != null) {
             isSavingPhoto = true
-            // Convert image URI to base64 data URL with compression
             try {
                 val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
                 if (inputStream != null) {
-                    // Decode bitmap with sampling to reduce memory
                     val options = BitmapFactory.Options().apply {
                         inJustDecodeBounds = true
                     }
                     BitmapFactory.decodeStream(inputStream, null, options)
                     inputStream.close()
                     
-                    // Calculate sample size to resize image (max 800px on largest side)
-                    // Sample size must be a power of 2
                     val maxSize = 800
                     val scale = when {
                         options.outWidth > options.outHeight -> options.outWidth / maxSize
@@ -102,7 +102,6 @@ fun ProfileScreen() {
                         else -> 16
                     }
                     
-                    // Decode with sampling
                     val decodeOptions = BitmapFactory.Options().apply {
                         inSampleSize = sampleSize
                     }
@@ -111,7 +110,6 @@ fun ProfileScreen() {
                     inputStream2?.close()
                     
                     if (bitmap != null) {
-                        // Compress bitmap to JPEG (quality 80)
                         val outputStream = ByteArrayOutputStream()
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
                         val compressedBytes = outputStream.toByteArray()
@@ -120,19 +118,16 @@ fun ProfileScreen() {
                         
                         android.util.Log.d("ProfileScreen", "Image compressed: ${compressedBytes.size} bytes")
                         
-                        // Convert to base64
                         val base64String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             Base64.getEncoder().encodeToString(compressedBytes)
                         } else {
                             android.util.Base64.encodeToString(compressedBytes, android.util.Base64.NO_WRAP)
                         }
                         
-                        // Create data URL
                         val dataUrl = "data:image/jpeg;base64,$base64String"
                         
                         android.util.Log.d("ProfileScreen", "Data URL length: ${dataUrl.length}")
                         
-                        // Save to Firestore
                         db.collection("users").document(currentUser.uid)
                             .set(mapOf("photoUrl" to dataUrl), SetOptions.merge())
                             .addOnSuccessListener {
@@ -163,12 +158,10 @@ fun ProfileScreen() {
         }
     }
 
-    // Permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            // Permission granted, launch image picker
             imagePicker.launch("image/*")
         } else {
             Toast.makeText(
@@ -179,21 +172,16 @@ fun ProfileScreen() {
         }
     }
 
-    // Function to handle photo selection click - checks permission first
     val handlePhotoSelectionClick = {
-        // Check if permission is already granted
         val hasPermission = ContextCompat.checkSelfPermission(context, photoPermission) == PackageManager.PERMISSION_GRANTED
         
         if (hasPermission) {
-            // Permission already granted, launch image picker directly
             imagePicker.launch("image/*")
         } else {
-            // Request permission first
             permissionLauncher.launch(photoPermission)
         }
     }
 
-    // Fetch Firestore data
     LaunchedEffect(Unit) {
         val currentUser = auth.currentUser
         if (currentUser != null) {
@@ -247,19 +235,20 @@ fun ProfileScreen() {
                     verticalArrangement = Arrangement.Top,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 24.dp)
+                        .padding(
+                            horizontal = if (isTablet) 32.dp else 24.dp, 
+                            vertical = if (isLandscape) 16.dp else 24.dp
+                        )
                 ) {
-                    // Picture frame with photo selection
                     Box(
                         modifier = Modifier
-                            .size(150.dp)
+                            .size(if (isTablet) 180.dp else 150.dp)
                             .clip(CircleShape)
                             .background(Color(0xFFE0E0E0))
                             .clickable(enabled = !isSavingPhoto, onClick = handlePhotoSelectionClick),
                         contentAlignment = Alignment.Center
                     ) {
                         if (userData?.photoUrl != null && userData?.photoUrl!!.isNotBlank()) {
-                            // Decode base64 data URL to ImageBitmap
                             val imageBitmap = remember(userData?.photoUrl) {
                                 try {
                                     val dataUrl = userData?.photoUrl ?: ""
@@ -289,7 +278,6 @@ fun ProfileScreen() {
                                     contentScale = ContentScale.Crop
                                 )
                             } else {
-                                // Fallback to AsyncImage if manual decode fails
                                 AsyncImage(
                                     model = userData?.photoUrl,
                                     contentDescription = "Profile Photo",
@@ -321,62 +309,70 @@ fun ProfileScreen() {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Name (bold) with separator
                     Text(
                         text = userData?.name ?: "Not set",
-                        fontSize = 32.sp,
+                        fontSize = if (isTablet) 36.sp else 32.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.Black
+                        color = Color.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
                     )
 
                     Divider(modifier = Modifier
                         .padding(top = 12.dp)
                         .fillMaxWidth(), color = Color.LightGray)
 
-                    // Section: Personal information
                     Text(
                         text = "Personal information",
                         style = MaterialTheme.typography.titleMedium,
-                        fontSize = 20.sp, // Change this value to adjust size
+                        fontSize = if (isTablet) 22.sp else 20.sp,
                         color = Color.Gray,
                         modifier = Modifier
                             .padding(top = 16.dp, bottom = 16.dp)
                             .align(Alignment.Start)
                     )
 
-                    // Email (bold)
-                    Column(modifier = Modifier.align(Alignment.Start)) {
+                    Column(modifier = Modifier
+                        .align(Alignment.Start)
+                        .fillMaxWidth()) {
                         Text(
                             text = "Email",
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color.Gray
+                            color = Color.Gray,
+                            fontSize = if (isTablet) 15.sp else 14.sp
                         )
                         Text(
                             text = userData?.email ?: "Not set",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = Color.Black
+                            fontSize = if (isTablet) 22.sp else 20.sp,
+                            color = Color.Black,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(if (isTablet) 16.dp else 12.dp))
 
-                    // Organization (bold)
-                    Column(modifier = Modifier.align(Alignment.Start)) {
+                    Column(modifier = Modifier
+                        .align(Alignment.Start)
+                        .fillMaxWidth()) {
                         Text(
                             text = "Organization",
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color.Gray
+                            color = Color.Gray,
+                            fontSize = if (isTablet) 15.sp else 14.sp
                         )
                         Text(
                             text = userData?.organization ?: "Not set",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = Color.Black
+                            fontSize = if (isTablet) 22.sp else 20.sp,
+                            color = Color.Black,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    // Logout button (center)
                     val activity = context as? Activity
                     Button(
                         onClick = {
