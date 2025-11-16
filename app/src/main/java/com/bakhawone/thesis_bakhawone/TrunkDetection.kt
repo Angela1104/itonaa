@@ -26,7 +26,11 @@ data class Detection(
     val isRhizophora: Boolean = false,
     val isAlive: Boolean? = null,
     val dbhCm: Float? = null,
-    val isInBoundary: Boolean? = null
+    val isInBoundary: Boolean? = null,
+    // Edge detection results
+    val leftEdgeX: Float? = null,
+    val rightEdgeX: Float? = null,
+    val edgeCenterY: Float? = null
 )
 
 /**
@@ -143,6 +147,14 @@ class TrunkDetection(
         detectAsync(bitmap)
     }
 
+    /**
+     * Convert YUV Image to Bitmap (ARCore-compatible).
+     * Public method for external use.
+     */
+    fun yuvToRgbBitmap(image: Image): Bitmap {
+        return yuvToRgb(image)
+    }
+    
     /**
      * Convert YUV Image to Bitmap (ARCore-compatible).
      */

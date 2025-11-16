@@ -216,6 +216,8 @@ class ARRenderer(
         }
     }
 
+    fun getLastFrame(): Frame? = lastFrame
+    
     fun isLocalPointInsideBoundary(localPoint: FloatArray): Boolean {
         // distance in XZ plane from center
         val d = kotlin.math.sqrt(localPoint[0]*localPoint[0] + localPoint[2]*localPoint[2])

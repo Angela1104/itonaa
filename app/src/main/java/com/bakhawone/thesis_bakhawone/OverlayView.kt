@@ -129,6 +129,49 @@ fun OverlayView(
                         dbhTextPaint
                     )
                 }
+                
+                // Draw edge lines if available (for edge detection-based DBH measurement)
+                if (detection.leftEdgeX != null && detection.rightEdgeX != null && detection.edgeCenterY != null) {
+                    val leftX = detection.leftEdgeX * scaleX
+                    val rightX = detection.rightEdgeX * scaleX
+                    val centerY = detection.edgeCenterY * scaleY
+                    val lineLength = 30f // Length of edge indicator lines
+                    
+                    val edgeLinePaint = AndroidPaint().apply {
+                        color = android.graphics.Color.CYAN // Cyan for edge lines to stand out from green bounding box
+                        strokeWidth = 4f
+                        style = AndroidPaint.Style.STROKE
+                        isAntiAlias = true
+                    }
+                    
+                    val connectingLinePaint = AndroidPaint().apply {
+                        color = android.graphics.Color.YELLOW // Yellow connecting line for DBH measurement
+                        strokeWidth = 3f
+                        style = AndroidPaint.Style.STROKE
+                        isAntiAlias = true
+                    }
+                    
+                    // Draw left edge line (vertical)
+                    canvas.nativeCanvas.drawLine(
+                        leftX, centerY - lineLength,
+                        leftX, centerY + lineLength,
+                        edgeLinePaint
+                    )
+                    
+                    // Draw right edge line (vertical)
+                    canvas.nativeCanvas.drawLine(
+                        rightX, centerY - lineLength,
+                        rightX, centerY + lineLength,
+                        edgeLinePaint
+                    )
+                    
+                    // Draw connecting line between edges (horizontal)
+                    canvas.nativeCanvas.drawLine(
+                        leftX, centerY,
+                        rightX, centerY,
+                        connectingLinePaint
+                    )
+                }
             }
 
             // Draw persistent markers for saved detections

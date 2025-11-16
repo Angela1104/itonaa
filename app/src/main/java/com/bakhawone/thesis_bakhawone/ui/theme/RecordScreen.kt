@@ -31,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalConfiguration
@@ -1129,7 +1130,8 @@ data class BarangaySummary(
     val deadCount: Int,
     val healthPercentage: Double,
     val status: String,
-    val trend: String
+    val trend: String,
+    val density: Double = 0.0
 )
 @Composable
 fun SummaryStatsCards(
@@ -1140,10 +1142,77 @@ fun SummaryStatsCards(
     isTablet: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(if (isTablet) 16.dp else 12.dp)
-    ) {
+    val configuration = LocalConfiguration.current
+    val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
+    val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
+    
+    if (isSmallScreen && !isLandscape) {
+        // Stack cards vertically on small portrait screens
+        Column(
+            modifier = modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SummaryCard(
+                    title = "Total Trunks",
+                    value = totalTrunks.toString(),
+                    icon = Icons.Filled.Park,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryCard(
+                    title = "Health %",
+                    value = String.format("%.1f%%", overallHealthPercentage),
+                    icon = Icons.Filled.Favorite,
+                    color = when {
+                        overallHealthPercentage >= 80.0 -> Color(0xFF4CAF50)
+                        overallHealthPercentage >= 51.0 -> Color(0xFF98FB98)
+                        overallHealthPercentage >= 41.0 -> Color(0xFFFFEB3B)
+                        else -> Color(0xFFF44336)
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SummaryCard(
+                    title = "Barangays",
+                    value = barangayCount.toString(),
+                    icon = Icons.Filled.LocationCity,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryCard(
+                    title = "Trend",
+                    value = when (trendIndicator) {
+                        "improving" -> "↑"
+                        "declining" -> "↓"
+                        else -> "→"
+                    },
+                    icon = when (trendIndicator) {
+                        "improving" -> Icons.Filled.TrendingUp
+                        "declining" -> Icons.Filled.TrendingDown
+                        else -> Icons.Filled.TrendingFlat
+                    },
+                    color = when (trendIndicator) {
+                        "improving" -> Color(0xFF4CAF50)
+                        "declining" -> Color(0xFFF44336)
+                        else -> Color(0xFF9E9E9E)
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    } else {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(if (isTablet) 16.dp else 12.dp)
+        ) {
         SummaryCard(
             title = "Total Trunks",
             value = totalTrunks.toString(),
@@ -1189,6 +1258,7 @@ fun SummaryStatsCards(
             },
             modifier = Modifier.weight(1f)
         )
+        }
     }
 }
 
@@ -1241,11 +1311,215 @@ fun SummaryCard(
     }
 }
 @Composable
+fun DensityTrendChart(
+    barangayMonthData: Map<String, List<BarangayMonthData>>,
+    selectedBarangays: Set<String>,
+    modifier: Modifier = Modifier
+) {
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
+    if (barangayMonthData.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No data available", color = MaterialTheme.colorScheme.secondary)
+        }
+        return
+    }
+    
+    if (selectedBarangays.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Select barangays to visualize", color = MaterialTheme.colorScheme.secondary)
+        }
+        return
+    }
+    
+    val barangaysToShow = selectedBarangays
+    val allMonthKeys = barangaysToShow
+        .flatMap { barangay -> barangayMonthData[barangay]?.map { it.monthKey } ?: emptyList() }
+        .distinct()
+        .sorted()
+    
+    if (allMonthKeys.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No data available", color = MaterialTheme.colorScheme.secondary)
+        }
+        return
+    }
+    
+    // Calculate density for each barangay/month (alive trees per 1000 sqm)
+    val areaInSqm = 1000.0
+    val maxDensity = barangaysToShow
+        .flatMap { barangay -> 
+            barangayMonthData[barangay]?.map { it.aliveCount / areaInSqm } ?: emptyList() 
+        }
+        .maxOrNull() ?: 1.0
+    
+    val yAxisWidth = if (isSmallScreen) 45f else if (isTablet) 70f else 60f
+    val xAxisHeight = if (isSmallScreen) 50f else if (isTablet) 70f else 60f
+    val chartPadding = if (isSmallScreen) 15f else if (isTablet) 25f else 20f
+    val labelTextSize = if (isSmallScreen) 18f else if (isTablet) 28f else 24f
+    val axisTextSize = if (isSmallScreen) 20f else if (isTablet) 32f else 28f
+    
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val chartWidth = width - yAxisWidth - chartPadding
+        val chartHeight = height - xAxisHeight - chartPadding
+        val chartStartX = yAxisWidth + chartPadding
+        val chartStartY = chartPadding
+        val chartEndX = width - chartPadding
+        val chartEndY = height - xAxisHeight
+        
+        val gridColor = Color.Gray.copy(alpha = 0.3f)
+        val axisColor = Color.Gray
+        val ySteps = 5
+        for (i in 0..ySteps) {
+            val y = chartStartY + (chartHeight * i / ySteps)
+            val value = maxDensity - (maxDensity * i / ySteps)
+            
+            drawLine(
+                color = gridColor,
+                start = Offset(chartStartX, y),
+                end = Offset(chartEndX, y),
+                strokeWidth = 1f
+            )
+            
+            drawIntoCanvas { canvas ->
+                val paint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.GRAY
+                    textSize = axisTextSize
+                    textAlign = android.graphics.Paint.Align.RIGHT
+                    isAntiAlias = true
+                }
+                canvas.nativeCanvas.drawText(
+                    String.format("%.3f", value),
+                    chartStartX - 10,
+                    y + 10,
+                    paint
+                )
+            }
+        }
+        val monthCount = allMonthKeys.size
+        allMonthKeys.forEachIndexed { index, monthKey ->
+            val x = chartStartX + (chartWidth * index / (monthCount - 1).coerceAtLeast(1))
+            
+            val parts = monthKey.split("-")
+            val monthIndex = parts.getOrNull(1)?.toIntOrNull()?.minus(1) ?: 0
+            val monthNames = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+            val monthLabel = if (monthIndex in 0..11) monthNames[monthIndex] else monthKey
+            
+            drawIntoCanvas { canvas ->
+                val paint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.GRAY
+                    textSize = labelTextSize
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    isAntiAlias = true
+                }
+                val labelY = if (isSmallScreen) chartEndY + 35 else chartEndY + 40
+                canvas.nativeCanvas.drawText(monthLabel, x, labelY, paint)
+            }
+        }
+        drawLine(
+            color = axisColor,
+            start = Offset(chartStartX, chartEndY),
+            end = Offset(chartEndX, chartEndY),
+            strokeWidth = 2f
+        )
+        drawLine(
+            color = axisColor,
+            start = Offset(chartStartX, chartStartY),
+            end = Offset(chartStartX, chartEndY),
+            strokeWidth = 2f
+        )
+        val colors = listOf(
+            Color(0xFF2196F3), Color(0xFF9C27B0), Color(0xFFFF9800),
+            Color(0xFF00BCD4), Color(0xFF8BC34A), Color(0xFFE91E63),
+            Color(0xFF3F51B5), Color(0xFF009688), Color(0xFFFFC107)
+        )
+        
+        barangaysToShow.forEachIndexed { barangayIndex, barangay ->
+            val color = colors[barangayIndex % colors.size]
+            val data = barangayMonthData[barangay] ?: return@forEachIndexed
+            val points = allMonthKeys.mapIndexed { monthIndex, monthKey ->
+                val monthData = data.find { it.monthKey == monthKey }
+                val density = (monthData?.aliveCount ?: 0) / areaInSqm
+                val x = chartStartX + (chartWidth * monthIndex / (monthCount - 1).coerceAtLeast(1))
+                val y = chartEndY - (chartHeight * density.toFloat() / maxDensity.toFloat())
+                Offset(x, y)
+            }
+            if (points.size > 1) {
+                // Create smooth curve using cubic bezier
+                val path = Path().apply {
+                    moveTo(points[0].x, points[0].y)
+                    
+                    for (i in 0 until points.size - 1) {
+                        val p0 = if (i > 0) points[i - 1] else points[i]
+                        val p1 = points[i]
+                        val p2 = points[i + 1]
+                        val p3 = if (i < points.size - 2) points[i + 2] else points[i + 1]
+                        
+                        // Calculate control points for smooth curve
+                        val cp1x = p1.x + (p2.x - p0.x) / 6f
+                        val cp1y = p1.y + (p2.y - p0.y) / 6f
+                        val cp2x = p2.x - (p3.x - p1.x) / 6f
+                        val cp2y = p2.y - (p3.y - p1.y) / 6f
+                        
+                        cubicTo(
+                            cp1x, cp1y,
+                            cp2x, cp2y,
+                            p2.x, p2.y
+                        )
+                    }
+                }
+                
+                // Draw smooth curve
+                drawPath(
+                    path = path,
+                    color = color,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = 3f,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                        join = androidx.compose.ui.graphics.StrokeJoin.Round
+                    )
+                )
+            } else if (points.size == 1) {
+                // Single point - draw as a circle
+                drawCircle(
+                    color = color,
+                    radius = 5f,
+                    center = points[0]
+                )
+            }
+            // Draw data points
+            points.forEach { point ->
+                drawCircle(
+                    color = color,
+                    radius = 5f,
+                    center = point
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun MultiBarangayTrendChart(
     barangayMonthData: Map<String, List<BarangayMonthData>>,
     selectedBarangays: Set<String>,
     modifier: Modifier = Modifier
 ) {
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
     if (barangayMonthData.isEmpty()) {
         Box(
             modifier = modifier,
@@ -1285,9 +1559,11 @@ fun MultiBarangayTrendChart(
         .flatMap { barangay -> barangayMonthData[barangay]?.map { it.aliveCount + it.deadCount } ?: emptyList() }
         .maxOrNull() ?: 100
     
-    val yAxisWidth = 50f
-    val xAxisHeight = 60f
-    val chartPadding = 20f
+    val yAxisWidth = if (isSmallScreen) 45f else if (isTablet) 70f else 50f
+    val xAxisHeight = if (isSmallScreen) 50f else if (isTablet) 70f else 60f
+    val chartPadding = if (isSmallScreen) 15f else if (isTablet) 25f else 20f
+    val labelTextSize = if (isSmallScreen) 18f else if (isTablet) 28f else 24f
+    val axisTextSize = if (isSmallScreen) 20f else if (isTablet) 32f else 28f
     
     Canvas(modifier = modifier) {
         val width = size.width
@@ -1335,11 +1611,12 @@ fun MultiBarangayTrendChart(
             drawIntoCanvas { canvas ->
                 val paint = android.graphics.Paint().apply {
                     color = android.graphics.Color.GRAY
-                    textSize = 24f
+                    textSize = labelTextSize
                     textAlign = android.graphics.Paint.Align.CENTER
                     isAntiAlias = true
                 }
-                canvas.nativeCanvas.drawText(monthLabel, x, chartEndY + 40, paint)
+                val labelY = if (isSmallScreen) chartEndY + 35 else chartEndY + 40
+                canvas.nativeCanvas.drawText(monthLabel, x, labelY, paint)
             }
         }
         drawLine(
@@ -1371,15 +1648,49 @@ fun MultiBarangayTrendChart(
                 Offset(x, y)
             }
             if (points.size > 1) {
-                for (i in 0 until points.size - 1) {
-                    drawLine(
-                        color = color,
-                        start = points[i],
-                        end = points[i + 1],
-                        strokeWidth = 3f
-                    )
+                // Create smooth curve using cubic bezier
+                val path = Path().apply {
+                    moveTo(points[0].x, points[0].y)
+                    
+                    for (i in 0 until points.size - 1) {
+                        val p0 = if (i > 0) points[i - 1] else points[i]
+                        val p1 = points[i]
+                        val p2 = points[i + 1]
+                        val p3 = if (i < points.size - 2) points[i + 2] else points[i + 1]
+                        
+                        // Calculate control points for smooth curve
+                        val cp1x = p1.x + (p2.x - p0.x) / 6f
+                        val cp1y = p1.y + (p2.y - p0.y) / 6f
+                        val cp2x = p2.x - (p3.x - p1.x) / 6f
+                        val cp2y = p2.y - (p3.y - p1.y) / 6f
+                        
+                        cubicTo(
+                            cp1x, cp1y,
+                            cp2x, cp2y,
+                            p2.x, p2.y
+                        )
+                    }
                 }
+                
+                // Draw smooth curve
+                drawPath(
+                    path = path,
+                    color = color,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = 3f,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                        join = androidx.compose.ui.graphics.StrokeJoin.Round
+                    )
+                )
+            } else if (points.size == 1) {
+                // Single point - draw as a circle
+                drawCircle(
+                    color = color,
+                    radius = 5f,
+                    center = points[0]
+                )
             }
+            // Draw data points
             points.forEach { point ->
                 drawCircle(
                     color = color,
@@ -1397,6 +1708,10 @@ fun QuickStatsTable(
     selectedBarangays: Set<String>,
     modifier: Modifier = Modifier
 ) {
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
+    
     val filteredSummaries = if (selectedBarangays.isEmpty()) {
         barangaySummaries
     } else {
@@ -1407,12 +1722,13 @@ fun QuickStatsTable(
         modifier = modifier,
         elevation = CardDefaults.cardElevation(4.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(if (isSmallScreen) 12.dp else if (isTablet) 20.dp else 16.dp)) {
             Text(
                 text = "Barangay Statistics",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 16.dp)
+                fontSize = if (isSmallScreen) 18.sp else if (isTablet) 22.sp else 20.sp,
+                modifier = Modifier.padding(bottom = if (isSmallScreen) 12.dp else 16.dp)
             )
             
             if (filteredSummaries.isEmpty()) {
@@ -1436,19 +1752,21 @@ fun QuickStatsTable(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = if (isSmallScreen) 6.dp else 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         "Barangay",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallScreen) 11.sp else if (isTablet) 14.sp else 12.sp,
                         modifier = Modifier.weight(2f)
                     )
                     Text(
                         "Total",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallScreen) 11.sp else if (isTablet) 14.sp else 12.sp,
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center
                     )
@@ -1456,6 +1774,15 @@ fun QuickStatsTable(
                         "% Alive",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallScreen) 11.sp else if (isTablet) 14.sp else 12.sp,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        "Density",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallScreen) 11.sp else if (isTablet) 14.sp else 12.sp,
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center
                     )
@@ -1463,6 +1790,7 @@ fun QuickStatsTable(
                         "Status",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallScreen) 11.sp else if (isTablet) 14.sp else 12.sp,
                         modifier = Modifier.weight(1.5f),
                         textAlign = TextAlign.Center
                     )
@@ -1470,6 +1798,7 @@ fun QuickStatsTable(
                         "Trend",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallScreen) 11.sp else if (isTablet) 14.sp else 12.sp,
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center
                     )
@@ -1484,13 +1813,14 @@ fun QuickStatsTable(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = if (isSmallScreen) 6.dp else 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 summary.barangay,
                                 style = MaterialTheme.typography.bodySmall,
+                                fontSize = if (isSmallScreen) 10.sp else if (isTablet) 13.sp else 12.sp,
                                 modifier = Modifier.weight(2f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1498,18 +1828,29 @@ fun QuickStatsTable(
                             Text(
                                 summary.totalTrunks.toString(),
                                 style = MaterialTheme.typography.bodySmall,
+                                fontSize = if (isSmallScreen) 10.sp else if (isTablet) 13.sp else 12.sp,
                                 modifier = Modifier.weight(1f),
                                 textAlign = TextAlign.Center
                             )
                             Text(
                                 String.format("%.1f%%", summary.healthPercentage),
                                 style = MaterialTheme.typography.bodySmall,
+                                fontSize = if (isSmallScreen) 10.sp else if (isTablet) 13.sp else 12.sp,
                                 modifier = Modifier.weight(1f),
                                 textAlign = TextAlign.Center
                             )
                             Text(
+                                String.format("%.4f", summary.density),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = if (isSmallScreen) 10.sp else if (isTablet) 13.sp else 12.sp,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
                                 summary.status,
                                 style = MaterialTheme.typography.bodySmall,
+                                fontSize = if (isSmallScreen) 10.sp else if (isTablet) 13.sp else 12.sp,
                                 color = when (summary.status) {
                                     "Very Healthy" -> Color(0xFF4CAF50)
                                     "Healthy" -> Color(0xFF98FB98)
@@ -1533,7 +1874,7 @@ fun QuickStatsTable(
                                 },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .size(20.dp)
+                                    .size(if (isSmallScreen) 16.dp else if (isTablet) 24.dp else 20.dp)
                             )
                         }
                         if (index < filteredSummaries.size - 1) {
@@ -1667,6 +2008,9 @@ fun BarangayTrendsScreen() {
                 } else {
                     0.0
                 }
+                // Density = Total number of alive trees / 1000 sqm
+                val areaInSqm = 1000.0
+                val density = totalAlive / areaInSqm
                 val status = when {
                     healthPercentage >= 80.0 -> "Very Healthy"
                     healthPercentage >= 51.0 -> "Healthy"
@@ -1703,7 +2047,8 @@ fun BarangayTrendsScreen() {
                     deadCount = totalDead,
                     healthPercentage = healthPercentage,
                     status = status,
-                    trend = trend
+                    trend = trend,
+                    density = density
                 )
             }.sortedByDescending { it.healthPercentage }
             
@@ -1756,23 +2101,29 @@ fun BarangayTrendsScreen() {
             )
         }
     } else {
+        val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = if (isTablet) 24.dp else 16.dp, vertical = 16.dp)
+                .padding(
+                    horizontal = if (isSmallScreen) 12.dp else if (isTablet) 24.dp else 16.dp,
+                    vertical = if (isSmallScreen) 12.dp else 16.dp
+                )
         ) {
             Text(
                 text = "Barangay Trends Dashboard",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp)
+                fontSize = if (isSmallScreen) 18.sp else if (isTablet) 24.sp else 20.sp,
+                modifier = Modifier.padding(bottom = if (isSmallScreen) 6.dp else 8.dp)
             )
             Text(
                 text = "Puerto Princesa City",
                 style = MaterialTheme.typography.bodyMedium,
+                fontSize = if (isSmallScreen) 12.sp else if (isTablet) 15.sp else 14.sp,
                 color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier.padding(bottom = if (isSmallScreen) 12.dp else 16.dp)
             )
             SummaryStatsCards(
                 totalTrunks = totalTrunks,
@@ -1788,34 +2139,104 @@ fun BarangayTrendsScreen() {
                     .padding(bottom = 16.dp),
                 elevation = CardDefaults.cardElevation(4.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
+                Column(modifier = Modifier.padding(if (isSmallScreen) 12.dp else if (isTablet) 20.dp else 16.dp)) {
+                    Text(
+                        text = "Alive Trunks Trend",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallScreen) 14.sp else if (isTablet) 18.sp else 16.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = if (isSmallScreen) 6.dp else 8.dp)
+                    )
+                    Text(
+                        text = "Shows the total number of alive rhizophora trees over time",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = if (isSmallScreen) 10.sp else if (isTablet) 13.sp else 12.sp,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(bottom = if (isSmallScreen) 12.dp else 16.dp)
+                    )
                     MultiBarangayTrendChart(
                         barangayMonthData = barangayMonthData,
                         selectedBarangays = selectedBarangays,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(if (isTablet) 400.dp else 300.dp)
+                            .height(if (isSmallScreen) 250.dp else if (isTablet) 400.dp else 300.dp)
                     )
-                    if (availableBarangays.isNotEmpty()) {
+                }
+            }
+            
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                elevation = CardDefaults.cardElevation(4.dp)
+            ) {
+                val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
+                Column(modifier = Modifier.padding(if (isSmallScreen) 12.dp else if (isTablet) 20.dp else 16.dp)) {
+                    Text(
+                        text = "Density Trend (Trees per 1000 sqm)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallScreen) 14.sp else if (isTablet) 18.sp else 16.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = if (isSmallScreen) 6.dp else 8.dp)
+                    )
+                    Text(
+                        text = "Shows the density of alive rhizophora trees over time",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = if (isSmallScreen) 10.sp else if (isTablet) 13.sp else 12.sp,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(bottom = if (isSmallScreen) 12.dp else 16.dp)
+                    )
+                    DensityTrendChart(
+                        barangayMonthData = barangayMonthData,
+                        selectedBarangays = selectedBarangays,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (isSmallScreen) 250.dp else if (isTablet) 400.dp else 300.dp)
+                    )
+                }
+            }
+            
+            // Barangay Selection Card - Below both charts
+            if (availableBarangays.isNotEmpty()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    elevation = CardDefaults.cardElevation(4.dp)
+                ) {
+                    val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
+                    Column(modifier = Modifier.padding(if (isSmallScreen) 12.dp else if (isTablet) 20.dp else 16.dp)) {
+                        Text(
+                            text = "Select Barangays",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (isSmallScreen) 14.sp else if (isTablet) 18.sp else 16.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = if (isSmallScreen) 8.dp else 12.dp)
+                        )
+                        
                         val barangayColors = listOf(
                             Color(0xFF2196F3), Color(0xFF9C27B0), Color(0xFFFF9800),
                             Color(0xFF00BCD4), Color(0xFF8BC34A), Color(0xFFE91E63),
                             Color(0xFF3F51B5), Color(0xFF009688), Color(0xFFFFC107)
                         )
                         
-                        Spacer(modifier = Modifier.height(16.dp))
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = if (isTablet) 200.dp else 150.dp)
+                        // Calculate chips per row based on screen size
+                        val chipsPerRow = if (isSmallScreen) 2 else if (isTablet) 5 else 4
+                        val chunkedBarangays = availableBarangays.chunked(chipsPerRow)
+                        
+                        // Use Column with Rows for natural wrapping without scroll
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(if (isSmallScreen) 6.dp else 8.dp)
                         ) {
-                            items(availableBarangays.chunked(if (isTablet) 4 else 3).size) { rowIndex ->
-                                val row = availableBarangays.chunked(if (isTablet) 4 else 3)[rowIndex]
+                            chunkedBarangays.forEach { row ->
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(if (isSmallScreen) 6.dp else 8.dp)
                                 ) {
                                     row.forEach { barangay ->
                                         val barangayIndex = availableBarangays.indexOf(barangay)
@@ -1838,6 +2259,7 @@ fun BarangayTrendsScreen() {
                                                 Text(
                                                     barangay, 
                                                     style = MaterialTheme.typography.bodySmall,
+                                                    fontSize = if (isSmallScreen) 10.sp else if (isTablet) 13.sp else 12.sp,
                                                     color = barangayColor,
                                                     fontWeight = if (selectedBarangays.contains(barangay)) FontWeight.Bold else FontWeight.Normal,
                                                     maxLines = 1,
@@ -1848,18 +2270,21 @@ fun BarangayTrendsScreen() {
                                             enabled = selectedBarangays.contains(barangay) || selectedBarangays.size < 10
                                         )
                                     }
-                                    repeat((if (isTablet) 4 else 3) - row.size) {
+                                    // Fill remaining space in row
+                                    repeat(chipsPerRow - row.size) {
                                         Spacer(modifier = Modifier.weight(1f))
                                     }
                                 }
                             }
                         }
+                        
                         if (selectedBarangays.size >= 10) {
                             Text(
                                 text = "Maximum 10 barangays can be selected for comparison",
                                 style = MaterialTheme.typography.bodySmall,
+                                fontSize = if (isSmallScreen) 10.sp else 12.sp,
                                 color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(top = 4.dp)
+                                modifier = Modifier.padding(top = if (isSmallScreen) 8.dp else 12.dp)
                             )
                         }
                     }

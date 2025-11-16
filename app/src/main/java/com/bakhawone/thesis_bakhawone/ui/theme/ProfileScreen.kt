@@ -58,6 +58,7 @@ fun ProfileScreen() {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
     val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
@@ -236,13 +237,13 @@ fun ProfileScreen() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(
-                            horizontal = if (isTablet) 32.dp else 24.dp, 
-                            vertical = if (isLandscape) 16.dp else 24.dp
+                            horizontal = if (isSmallScreen) 16.dp else if (isTablet) 32.dp else 24.dp, 
+                            vertical = if (isSmallScreen) 12.dp else if (isLandscape) 16.dp else 24.dp
                         )
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(if (isTablet) 180.dp else 150.dp)
+                            .size(if (isSmallScreen) 120.dp else if (isTablet) 180.dp else 150.dp)
                             .clip(CircleShape)
                             .background(Color(0xFFE0E0E0))
                             .clickable(enabled = !isSavingPhoto, onClick = handlePhotoSelectionClick),
@@ -295,23 +296,23 @@ fun ProfileScreen() {
                             Icon(
                                 imageVector = Icons.Default.Person,
                                 contentDescription = "No Photo",
-                                modifier = Modifier.size(64.dp),
+                                modifier = Modifier.size(if (isSmallScreen) 48.dp else if (isTablet) 80.dp else 64.dp),
                                 tint = Color.DarkGray
                             )
                         }
                         if (isSavingPhoto) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier.size(if (isSmallScreen) 36.dp else if (isTablet) 56.dp else 48.dp),
                                 color = Color.White
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(if (isSmallScreen) 12.dp else 16.dp))
 
                     Text(
                         text = userData?.name ?: "Not set",
-                        fontSize = if (isTablet) 36.sp else 32.sp,
+                        fontSize = if (isSmallScreen) 24.sp else if (isTablet) 36.sp else 32.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.Black,
                         maxLines = 2,
@@ -320,16 +321,19 @@ fun ProfileScreen() {
                     )
 
                     Divider(modifier = Modifier
-                        .padding(top = 12.dp)
+                        .padding(top = if (isSmallScreen) 8.dp else 12.dp)
                         .fillMaxWidth(), color = Color.LightGray)
 
                     Text(
                         text = "Personal information",
                         style = MaterialTheme.typography.titleMedium,
-                        fontSize = if (isTablet) 22.sp else 20.sp,
+                        fontSize = if (isSmallScreen) 16.sp else if (isTablet) 22.sp else 20.sp,
                         color = Color.Gray,
                         modifier = Modifier
-                            .padding(top = 16.dp, bottom = 16.dp)
+                            .padding(
+                                top = if (isSmallScreen) 12.dp else 16.dp,
+                                bottom = if (isSmallScreen) 12.dp else 16.dp
+                            )
                             .align(Alignment.Start)
                     )
 
@@ -340,19 +344,19 @@ fun ProfileScreen() {
                             text = "Email",
                             style = MaterialTheme.typography.labelMedium,
                             color = Color.Gray,
-                            fontSize = if (isTablet) 15.sp else 14.sp
+                            fontSize = if (isSmallScreen) 12.sp else if (isTablet) 15.sp else 14.sp
                         )
                         Text(
                             text = userData?.email ?: "Not set",
                             fontWeight = FontWeight.Bold,
-                            fontSize = if (isTablet) 22.sp else 20.sp,
+                            fontSize = if (isSmallScreen) 16.sp else if (isTablet) 22.sp else 20.sp,
                             color = Color.Black,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(if (isTablet) 16.dp else 12.dp))
+                    Spacer(modifier = Modifier.height(if (isSmallScreen) 10.dp else if (isTablet) 16.dp else 12.dp))
 
                     Column(modifier = Modifier
                         .align(Alignment.Start)
@@ -361,12 +365,12 @@ fun ProfileScreen() {
                             text = "Organization",
                             style = MaterialTheme.typography.labelMedium,
                             color = Color.Gray,
-                            fontSize = if (isTablet) 15.sp else 14.sp
+                            fontSize = if (isSmallScreen) 12.sp else if (isTablet) 15.sp else 14.sp
                         )
                         Text(
                             text = userData?.organization ?: "Not set",
                             fontWeight = FontWeight.Bold,
-                            fontSize = if (isTablet) 22.sp else 20.sp,
+                            fontSize = if (isSmallScreen) 16.sp else if (isTablet) 22.sp else 20.sp,
                             color = Color.Black,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -382,10 +386,14 @@ fun ProfileScreen() {
                             activity?.finish()
                         },
                         modifier = Modifier
-                            .padding(top = 24.dp)
+                            .padding(top = if (isSmallScreen) 16.dp else 24.dp)
                             .align(Alignment.CenterHorizontally)
+                            .height(if (isSmallScreen) 40.dp else if (isTablet) 56.dp else 48.dp)
                     ) {
-                        Text("Logout")
+                        Text(
+                            "Logout",
+                            fontSize = if (isSmallScreen) 14.sp else if (isTablet) 16.sp else 15.sp
+                        )
                     }
                 }
             }
@@ -400,17 +408,34 @@ fun ProfileRoundedField(
     icon: ImageVector,
     trailingIcon: (@Composable () -> Unit)? = null
 ) {
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
+    
     OutlinedTextField(
         value = value,
         onValueChange = {},
-        label = { Text(label, fontSize = 15.sp, color = Color.Black) },
-        leadingIcon = { Icon(imageVector = icon, contentDescription = label, tint = Color.Black) },
+        label = { 
+            Text(
+                label, 
+                fontSize = if (isSmallScreen) 12.sp else if (isTablet) 16.sp else 15.sp, 
+                color = Color.Black
+            ) 
+        },
+        leadingIcon = { 
+            Icon(
+                imageVector = icon, 
+                contentDescription = label, 
+                tint = Color.Black,
+                modifier = Modifier.size(if (isSmallScreen) 20.dp else if (isTablet) 28.dp else 24.dp)
+            ) 
+        },
         trailingIcon = trailingIcon,
         shape = RoundedCornerShape(50.dp),
         singleLine = true,
         enabled = false,
         textStyle = TextStyle.Default.copy(
-            fontSize = 18.sp,
+            fontSize = if (isSmallScreen) 14.sp else if (isTablet) 20.sp else 18.sp,
             color = Color.Black
         ),
         colors = OutlinedTextFieldDefaults.colors(
@@ -436,28 +461,57 @@ fun EditOrganizationDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit
 ) {
+    val configuration = LocalConfiguration.current
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+    val isSmallScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 400
+    
     var tempOrg by remember { mutableStateOf(organization) }
 
     AlertDialog(
         onDismissRequest = { onDismiss() },
-        title = { Text("Edit Organization") },
+        title = { 
+            Text(
+                "Edit Organization",
+                fontSize = if (isSmallScreen) 16.sp else if (isTablet) 20.sp else 18.sp
+            ) 
+        },
         text = {
             OutlinedTextField(
                 value = tempOrg,
                 onValueChange = { tempOrg = it },
-                label = { Text("Organization Name") },
+                label = { 
+                    Text(
+                        "Organization Name",
+                        fontSize = if (isSmallScreen) 12.sp else if (isTablet) 15.sp else 14.sp
+                    ) 
+                },
+                textStyle = TextStyle(
+                    fontSize = if (isSmallScreen) 14.sp else if (isTablet) 16.sp else 15.sp
+                ),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
         },
         confirmButton = {
-            Button(onClick = { if (tempOrg.isNotBlank()) onSave(tempOrg) }) {
-                Text("Save")
+            Button(
+                onClick = { if (tempOrg.isNotBlank()) onSave(tempOrg) },
+                modifier = Modifier.height(if (isSmallScreen) 40.dp else if (isTablet) 48.dp else 44.dp)
+            ) {
+                Text(
+                    "Save",
+                    fontSize = if (isSmallScreen) 14.sp else if (isTablet) 16.sp else 15.sp
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = { onDismiss() }) {
-                Text("Cancel")
+            TextButton(
+                onClick = { onDismiss() },
+                modifier = Modifier.height(if (isSmallScreen) 40.dp else if (isTablet) 48.dp else 44.dp)
+            ) {
+                Text(
+                    "Cancel",
+                    fontSize = if (isSmallScreen) 14.sp else if (isTablet) 16.sp else 15.sp
+                )
             }
         }
     )

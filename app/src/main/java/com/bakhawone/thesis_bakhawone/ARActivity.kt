@@ -245,16 +245,72 @@ class ARActivity : ComponentActivity() {
                             val isDead = det.label.contains("Dead", ignoreCase = true)
                             
                             val fx = renderer.getFxPixels() ?: return@map det
-                            val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
-                            // Calculate DBH only for alive Rhizophora inside boundary
-                            val dbhMeters = if (isRhizo && isAlive && inBoundary) (boxWidthPxOnScreen * depth / fx) else null
-                            val dbhCm = dbhMeters?.let { (it * 100f).coerceIn(0f, 500f) }
+                            
+                            // Try edge detection for visualization (only for alive Rhizophora inside boundary)
+                            var dbhCm: Float? = null
+                            var leftEdgeX: Float? = null
+                            var rightEdgeX: Float? = null
+                            var edgeCenterY: Float? = null
+                            
+                            if (isRhizo && isAlive && inBoundary) {
+                                // Try to get frame for edge detection
+                                val frame = renderer.getLastFrame()
+                                if (frame != null) {
+                                    try {
+                                        val cameraImage = frame.acquireCameraImage()
+                                        val bitmap = trunkDetector?.yuvToRgbBitmap(cameraImage)
+                                        cameraImage.close()
+                                        
+                                        if (bitmap != null) {
+                                            val edgeLines = EdgeDetection.detectTrunkEdges(bitmap, det.box)
+                                            if (edgeLines != null) {
+                                                leftEdgeX = edgeLines.leftEdgeX
+                                                rightEdgeX = edgeLines.rightEdgeX
+                                                edgeCenterY = edgeLines.centerY
+                                                
+                                                // Calculate DBH using edge distance
+                                                val edgeCenterScreenX = edgeLines.leftEdgeX * scaleX
+                                                val edgeCenterScreenY = edgeLines.centerY * scaleY
+                                                val edgeWp = renderer.worldPointAndDepthFromScreen(edgeCenterScreenX, edgeCenterScreenY)
+                                                val edgeDepth = edgeWp?.second ?: depth
+                                                
+                                                val dbhMeters = (edgeLines.edgeWidthPx * scaleX * edgeDepth / fx)
+                                                dbhCm = (dbhMeters * 100f).coerceIn(0f, 100f)
+                                            } else {
+                                                // Fallback to original method
+                                                val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                                                val dbhMeters = (boxWidthPxOnScreen * depth / fx)
+                                                dbhCm = (dbhMeters * 100f).coerceIn(0f, 100f)
+                                            }
+                                            bitmap.recycle()
+                                        } else {
+                                            // Fallback to original method
+                                            val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                                            val dbhMeters = (boxWidthPxOnScreen * depth / fx)
+                                            dbhCm = (dbhMeters * 100f).coerceIn(0f, 100f)
+                                        }
+                                    } catch (e: Exception) {
+                                        // Fallback to original method on error
+                                        val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                                        val dbhMeters = (boxWidthPxOnScreen * depth / fx)
+                                        dbhCm = (dbhMeters * 100f).coerceIn(0f, 100f)
+                                    }
+                                } else {
+                                    // Fallback to original method if frame not available
+                                    val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                                    val dbhMeters = (boxWidthPxOnScreen * depth / fx)
+                                    dbhCm = (dbhMeters * 100f).coerceIn(0f, 100f)
+                                }
+                            }
                             
                             det.copy(
                                 isRhizophora = isRhizo,
                                 isAlive = if (isRhizo) isAlive else null, // Only set isAlive for Rhizophora
                                 dbhCm = dbhCm,
-                                isInBoundary = inBoundary
+                                isInBoundary = inBoundary,
+                                leftEdgeX = leftEdgeX,
+                                rightEdgeX = rightEdgeX,
+                                edgeCenterY = edgeCenterY
                             )
                         } else {
                             // No world point available - still mark Rhizophora status for overlay
@@ -510,11 +566,76 @@ class ARActivity : ComponentActivity() {
                     return
                 }
 
-                // Step 4: DBH Measurement (only for alive trunks)
-                val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
-                val dbhMeters = if (isAlive) (boxWidthPxOnScreen * depth / fx) else null
-                val rawDbhCm = dbhMeters?.let { (it * 100f).coerceIn(0f, 500f) }
-                val dbhCmForFirestore = rawDbhCm ?: 0f
+                // Step 4: DBH Measurement using Edge Detection (only for alive trunks)
+                var dbhCmForFirestore = 0f
+                var leftEdgeX: Float? = null
+                var rightEdgeX: Float? = null
+                var edgeCenterY: Float? = null
+
+                if (isAlive) {
+                    // Get current camera frame bitmap for edge detection
+                    val frame = renderer.getLastFrame()
+                    if (frame != null) {
+                        try {
+                            val cameraImage = frame.acquireCameraImage()
+                            val bitmap = trunkDetector?.yuvToRgbBitmap(cameraImage)
+                            cameraImage.close()
+                            
+                            if (bitmap != null) {
+                                // Detect edges in top half of bounding box
+                                val edgeLines = EdgeDetection.detectTrunkEdges(bitmap, det.box)
+                                
+                                if (edgeLines != null) {
+                                    leftEdgeX = edgeLines.leftEdgeX
+                                    rightEdgeX = edgeLines.rightEdgeX
+                                    edgeCenterY = edgeLines.centerY
+                                    
+                                    // Calculate DBH using edge distance and depth
+                                    // Get depth at edge center point
+                                    val edgeCenterScreenX = edgeLines.leftEdgeX * scaleX
+                                    val edgeCenterScreenY = edgeLines.centerY * scaleY
+                                    val edgeWp = renderer.worldPointAndDepthFromScreen(edgeCenterScreenX, edgeCenterScreenY)
+                                    
+                                    if (edgeWp != null) {
+                                        val edgeDepth = edgeWp.second
+                                        val fx = renderer.getFxPixels() ?: fx
+                                        
+                                        // Convert pixel width to real-world distance
+                                        val dbhMeters = (edgeLines.edgeWidthPx * scaleX * edgeDepth / fx)
+                                        dbhCmForFirestore = (dbhMeters * 100f).coerceIn(0f, 100f)
+                                    } else {
+                                        // Fallback: use original depth if edge depth unavailable
+                                        val dbhMeters = (edgeLines.edgeWidthPx * scaleX * depth / fx)
+                                        dbhCmForFirestore = (dbhMeters * 100f).coerceIn(0f, 100f)
+                                    }
+                                } else {
+                                    // Fallback to original method if edge detection fails
+                                    val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                                    val dbhMeters = (boxWidthPxOnScreen * depth / fx)
+                                    dbhCmForFirestore = (dbhMeters * 100f).coerceIn(0f, 100f)
+                                }
+                                
+                                bitmap.recycle()
+                            } else {
+                                // Fallback if bitmap conversion fails
+                                val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                                val dbhMeters = (boxWidthPxOnScreen * depth / fx)
+                                dbhCmForFirestore = (dbhMeters * 100f).coerceIn(0f, 100f)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("ARActivity", "Edge detection failed, using fallback", e)
+                            // Fallback to original method
+                            val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                            val dbhMeters = (boxWidthPxOnScreen * depth / fx)
+                            dbhCmForFirestore = (dbhMeters * 100f).coerceIn(0f, 100f)
+                        }
+                    } else {
+                        // Fallback if frame not available
+                        val boxWidthPxOnScreen = (det.box.right - det.box.left) * scaleX
+                        val dbhMeters = (boxWidthPxOnScreen * depth / fx)
+                        dbhCmForFirestore = (dbhMeters * 100f).coerceIn(0f, 100f)
+                    }
+                }
 
                 // Step 5: Data Saving - Store in Firebase with proper structure
                 val trunkId = "trunk_${java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8)}"
@@ -557,7 +678,7 @@ class ARActivity : ComponentActivity() {
                                     id = posKey,
                                     localPosition = floatArrayOf(localVec[0], localVec[1], localVec[2]),
                                     isAlive = isAlive,
-                                    dbhCm = rawDbhCm
+                                    dbhCm = if (dbhCmForFirestore > 0f) dbhCmForFirestore else null
                                 )
                             )
                         }
