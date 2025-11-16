@@ -570,7 +570,8 @@ fun ReportsScreen(
                             val isAlive = doc.getLong("is_alive") ?: 0L
                             val status = if (isAlive == 1L) "Alive" else "Dead"
                             val dbhCm = doc.getDouble("dbh_cm") ?: 0.0
-                            val basalArea = 0.00007854 * dbhCm
+                            // Basal Area = π * (DBH/200)² = π * DBH² / 40000 (DBH in cm, result in m²)
+                            val basalArea = Math.PI * (dbhCm / 200.0) * (dbhCm / 200.0)
                             
                             val trunkData = TrunkReportData(
                                 trunkId = trunkId,
@@ -803,7 +804,7 @@ fun ReportsScreen(
                                         fontSize = if (isTablet) 13.sp else 12.sp
                                     )
                                     Text(
-                                        String.format("%.6f", trunk.basalArea),
+                                        String.format("%.3f", trunk.basalArea),
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.weight(1f),
                                         textAlign = TextAlign.Start,
@@ -823,19 +824,37 @@ fun ReportsScreen(
                             Divider(
                                 modifier = Modifier.padding(vertical = 8.dp)
                                 )
-                                Row(
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(top = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(top = 8.dp)
                                 ) {
-                                Text(
-                                        "Basal Area per Acre: ${String.format("%.6f", totalBasalArea)}",
+                                    // Basal Area per Acre
+                                    Text(
+                                        "Basal Area per Acre: ${String.format("%.3f", totalBasalArea)}",
                                         style = MaterialTheme.typography.bodyLarge,
                                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
                                     )
+                                    // Density Estimation (alive trees per 1000 sqm)
+                                    // Density = Total number of alive trees / 1000 sqm
+                                    val aliveTreesCount = trunks.count { it.status == "Alive" }
+                                    val areaInSqm = 1000.0
+                                    val densityPer1000Sqm = aliveTreesCount / areaInSqm
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "Density: ${String.format("%.4f", densityPer1000Sqm)} trees per 1000 sqm",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                 if (hasMore) {
                                     IconButton(
                                         onClick = {

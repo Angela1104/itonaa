@@ -157,7 +157,8 @@ fun PrintScreen() {
                             val isAlive = doc.getLong("is_alive") ?: 0L
                             val status = if (isAlive == 1L) "Alive" else "Dead"
                             val dbhCm = doc.getDouble("dbh_cm") ?: 0.0
-                            val basalArea = 0.00007854 * dbhCm
+                            // Basal Area = π * (DBH/200)² = π * DBH² / 40000 (DBH in cm, result in m²)
+                            val basalArea = Math.PI * (dbhCm / 200.0) * (dbhCm / 200.0)
                             
                             val trunkData = TrunkPrintData(
                                 trunkId = trunkId,
@@ -469,10 +470,16 @@ fun exportToExcel(context: Context, locationName: String, monthKey: String, trun
         csvContent.append("Trunk ID,Status,DBH(cm),Basal Area(m²)\n")
         
         trunks.forEach { trunk ->
-            csvContent.append("${trunk.trunkId},${trunk.status},${String.format("%.1f", trunk.dbhCm)},${String.format("%.6f", trunk.basalArea)}\n")
+            csvContent.append("${trunk.trunkId},${trunk.status},${String.format("%.1f", trunk.dbhCm)},${String.format("%.3f", trunk.basalArea)}\n")
         }
         
-        csvContent.append("\nTotal Basal Area per Acre,${String.format("%.6f", totalBasalArea)}\n")
+        csvContent.append("\nTotal Basal Area per Acre,${String.format("%.3f", totalBasalArea)}\n")
+        // Density Estimation (alive trees per 1000 sqm)
+        // Density = Total number of alive trees / 1000 sqm
+        val aliveTreesCount = trunks.count { it.status == "Alive" }
+        val areaInSqm = 1000.0
+        val densityPer1000Sqm = aliveTreesCount / areaInSqm
+        csvContent.append("Density,${String.format("%.4f", densityPer1000Sqm)} trees per 1000 sqm\n")
         
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->
             outputStream.write(csvContent.toString().toByteArray(Charsets.UTF_8))
@@ -568,7 +575,7 @@ fun exportToPdf(context: Context, locationName: String, monthKey: String, trunks
                 newCanvas.drawText(trunk.trunkId.take(12), margin.toFloat(), yPos, textPaint)
                 newCanvas.drawText(trunk.status, margin + 150f, yPos, textPaint)
                 newCanvas.drawText(String.format("%.1f", trunk.dbhCm), margin + 250f, yPos, textPaint)
-                newCanvas.drawText(String.format("%.6f", trunk.basalArea), margin + 350f, yPos, textPaint)
+                newCanvas.drawText(String.format("%.3f", trunk.basalArea), margin + 350f, yPos, textPaint)
                 yPos += 20f
                 
                 canvas = newCanvas
@@ -577,7 +584,7 @@ fun exportToPdf(context: Context, locationName: String, monthKey: String, trunks
                 canvas.drawText(trunk.trunkId.take(12), margin.toFloat(), yPos, textPaint)
                 canvas.drawText(trunk.status, margin + 150f, yPos, textPaint)
                 canvas.drawText(String.format("%.1f", trunk.dbhCm), margin + 250f, yPos, textPaint)
-                canvas.drawText(String.format("%.6f", trunk.basalArea), margin + 350f, yPos, textPaint)
+                canvas.drawText(String.format("%.3f", trunk.basalArea), margin + 350f, yPos, textPaint)
                 yPos += 20f
             }
         }
@@ -587,8 +594,17 @@ fun exportToPdf(context: Context, locationName: String, monthKey: String, trunks
         canvas.drawLine(margin.toFloat(), yPos, (pageWidth - margin).toFloat(), yPos, textPaint)
         yPos += 20f
         
-        val totalText = "Total Basal Area per Acre: ${String.format("%.6f", totalBasalArea)}"
+        val totalText = "Total Basal Area per Acre: ${String.format("%.3f", totalBasalArea)}"
         canvas.drawText(totalText, margin.toFloat(), yPos, headerPaint)
+        yPos += 25f
+        
+        // Density Estimation (alive trees per 1000 sqm)
+        // Density = Total number of alive trees / 1000 sqm
+        val aliveTreesCount = trunks.count { it.status == "Alive" }
+        val areaInSqm = 1000.0
+        val densityPer1000Sqm = aliveTreesCount / areaInSqm
+        val densityText = "Density: ${String.format("%.4f", densityPer1000Sqm)} trees per 1000 sqm"
+        canvas.drawText(densityText, margin.toFloat(), yPos, headerPaint)
         
         pdfDocument.finishPage(page)
         

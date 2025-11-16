@@ -73,23 +73,41 @@ class TrunkDetection(
     private fun loadModelAndLabels() {
         try {
             labels = FileUtil.loadLabels(context, labelsFile)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            Log.d(TAG, "✅ Loaded ${labels.size} labels: ${labels.joinToString(", ")}")
         } catch (e: Exception) {
             Log.e(TAG, "Error loading labels, using default list", e)
             labels = listOf(
                 "Alive Rhizophora",
-                "Alive Trunk",
-                "Dead Rhizophora",
-                "Dead Trunk"
+                "Dead Rhizophora"
             )
+        }
+
+        if (labels.isEmpty()) {
+            Log.e(TAG, "❌ No labels available, cannot run detection")
+            return
         }
 
         try {
             val model = FileUtil.loadMappedFile(context, modelFile)
-            val options = Interpreter.Options().apply { setNumThreads(2) }
-            interpreter = Interpreter(model, options)
+            val options = Interpreter.Options().apply { 
+                setNumThreads(2)
+                setUseXNNPACK(true) // Enable XNNPACK for better performance
+            }
+            val newInterpreter = Interpreter(model, options)
+            interpreter = newInterpreter
+            
+            // Get input and output tensor info for validation
+            val inputTensor = newInterpreter.getInputTensor(0)
+            val outputTensor = newInterpreter.getOutputTensor(0)
             Log.d(TAG, "✅ Model loaded successfully")
+            Log.d(TAG, "   Input shape: ${inputTensor.shape().contentToString()}")
+            Log.d(TAG, "   Output shape: ${outputTensor.shape().contentToString()}")
+            Log.d(TAG, "   Expected output dim: ${labels.size + 4} (4 bbox + ${labels.size} classes)")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Model load failed: ${e.message}", e)
+            e.printStackTrace()
         }
     }
 
@@ -153,6 +171,10 @@ class TrunkDetection(
      */
     private fun detect(bitmap: Bitmap): List<Detection> {
         val interpreter = interpreter ?: return emptyList()
+        if (labels.isEmpty()) {
+            Log.w(TAG, "No labels loaded, skipping detection")
+            return emptyList()
+        }
 
         return try {
             val processed = letterboxImage(bitmap, imageSize)
@@ -169,19 +191,29 @@ class TrunkDetection(
                 }
             }
 
-            // Output tensor: YOLO-style [1, 8, 8400]
-            val output = Array(1) { Array(8) { FloatArray(8400) } }
+            // Output tensor: YOLO-style [1, num_classes+4, 8400]
+            // Format: [x, y, w, h, class1_score, class2_score, ...]
+            val numClasses = labels.size
+            val outputDim = numClasses + 4
+            val output = Array(1) { Array(outputDim) { FloatArray(8400) } }
+            
             synchronized(interpreter) {
                 interpreter.run(inputBuffer, output)
             }
 
             val detections = mutableListOf<Detection>()
+            val scale = processed.scale
+            val dx = processed.dx
+            val dy = processed.dy
+            
             for (i in 0 until 8400) {
-                val x = output[0][0][i]
-                val y = output[0][1][i]
-                val w = output[0][2][i]
-                val h = output[0][3][i]
+                // Model outputs normalized coordinates (0-1) relative to 640x640 letterboxed image
+                val xNorm = output[0][0][i]
+                val yNorm = output[0][1][i]
+                val wNorm = output[0][2][i]
+                val hNorm = output[0][3][i]
 
+                // Find best class
                 var bestClass = -1
                 var bestScore = 0f
                 for (c in labels.indices) {
@@ -193,31 +225,59 @@ class TrunkDetection(
                 }
 
                 if (bestScore > confidenceThreshold && bestClass in labels.indices) {
-                    val left = (x - w / 2) * bitmap.width
-                    val top = (y - h / 2) * bitmap.height
-                    val right = (x + w / 2) * bitmap.width
-                    val bottom = (y + h / 2) * bitmap.height
+                    // Convert from normalized coordinates (0-1) in letterboxed space to pixel coordinates
+                    // Letterboxed coordinates (0-640)
+                    val xLetterbox = xNorm * imageSize
+                    val yLetterbox = yNorm * imageSize
+                    val wLetterbox = wNorm * imageSize
+                    val hLetterbox = hNorm * imageSize
+                    
+                    // Convert from letterboxed space to original image space
+                    // Remove padding offset and scale back
+                    val xOriginal = (xLetterbox - dx) / scale
+                    val yOriginal = (yLetterbox - dy) / scale
+                    val wOriginal = wLetterbox / scale
+                    val hOriginal = hLetterbox / scale
+                    
+                    // Calculate bounding box in original image coordinates
+                    val left = xOriginal - wOriginal / 2f
+                    val top = yOriginal - hOriginal / 2f
+                    val right = xOriginal + wOriginal / 2f
+                    val bottom = yOriginal + hOriginal / 2f
 
+                    // Validate bounding box
                     if (right > left && bottom > top &&
-                        left >= 0 && top >= 0 &&
-                        right <= bitmap.width && bottom <= bitmap.height
+                        left >= -bitmap.width * 0.1f && top >= -bitmap.height * 0.1f &&
+                        right <= bitmap.width * 1.1f && bottom <= bitmap.height * 1.1f
                     ) {
-                        val label = labels[bestClass]
-                        detections.add(
-                            Detection(
-                                box = RectF(left, top, right, bottom),
-                                label = "$label (${String.format("%.1f", bestScore * 100)}%)",
-                                score = bestScore
+                        // Clamp to image bounds
+                        val clampedLeft = left.coerceIn(0f, bitmap.width.toFloat())
+                        val clampedTop = top.coerceIn(0f, bitmap.height.toFloat())
+                        val clampedRight = right.coerceIn(0f, bitmap.width.toFloat())
+                        val clampedBottom = bottom.coerceIn(0f, bitmap.height.toFloat())
+                        
+                        if (clampedRight > clampedLeft && clampedBottom > clampedTop) {
+                            val label = labels[bestClass]
+                            detections.add(
+                                Detection(
+                                    box = RectF(clampedLeft, clampedTop, clampedRight, clampedBottom),
+                                    label = "$label (${String.format("%.1f", bestScore * 100)}%)",
+                                    score = bestScore
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
 
             processed.bitmap.recycle()
+            if (detections.isNotEmpty()) {
+                Log.d(TAG, "Detected ${detections.size} objects")
+            }
             detections
         } catch (e: Exception) {
             Log.e(TAG, "Detection error: ${e.message}", e)
+            e.printStackTrace()
             emptyList()
         }
     }
