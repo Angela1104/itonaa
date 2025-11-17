@@ -55,6 +55,8 @@ class ARActivity : ComponentActivity() {
     private var deviceStartLon: Double = 0.0 // GPS coordinates from HomeScreen
     private val savedDetectionIds = mutableSetOf<String>() // Track saved detections to prevent duplicates
     private val savedMarkers = mutableStateListOf<SavedDetectionMarker>()
+    private var hasDetectedRhizophora = false // Track if any rhizophora trees were detected during this session
+    private var detectionWasStarted = false // Track if detection was ever started in this session
 
     // made non-private so ARRenderer can access them
     var detectionRunning = false
@@ -414,7 +416,6 @@ class ARActivity : ComponentActivity() {
                             onClick = {
                                 stopTrunkDetection()
                                 isDetecting = false
-                                goToDashboard()
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary
@@ -672,6 +673,7 @@ class ARActivity : ComponentActivity() {
                     .set(data)
                     .addOnSuccessListener {
                         savedDetectionIds.add(posKey) // Mark as saved
+                        hasDetectedRhizophora = true // Mark that we detected at least one rhizophora
                         if (savedMarkers.none { it.id == posKey }) {
                             savedMarkers.add(
                                 SavedDetectionMarker(
@@ -698,6 +700,7 @@ class ARActivity : ComponentActivity() {
     private fun startTrunkDetection() {
         if (detectionRunning) return
         detectionRunning = true
+        detectionWasStarted = true // Mark that detection was started
         trunkDetector = TrunkDetection(this)
         Toast.makeText(this, "Detection started", Toast.LENGTH_SHORT).show()
     }
@@ -720,10 +723,39 @@ class ARActivity : ComponentActivity() {
         trunkDetector?.close()
         trunkDetector = null
         
-        Toast.makeText(this, "Detection stopped", Toast.LENGTH_SHORT).show()
+        // Step 4: Wait a moment for any async Firebase saves to complete, then check if any rhizophora were detected
+        Handler(Looper.getMainLooper()).postDelayed({
+            checkAndCleanupPinnedLocation()
+            Toast.makeText(this, "Detection stopped", Toast.LENGTH_SHORT).show()
+            // Step 5: Navigate back to HomeScreen
+            goToDashboard()
+        }, 1000) // Wait 1 second for async operations to complete
+    }
+    
+    private fun checkAndCleanupPinnedLocation() {
+        // Only check if we have a pinned location document ID
+        if (pinnedLocationDocId == null) {
+            return
+        }
         
-        // Step 4: Navigate back to HomeScreen
-        goToDashboard()
+        val userId = auth.currentUser?.uid ?: return
+        
+        // If no rhizophora trees were detected, delete the pinned location
+        if (!hasDetectedRhizophora) {
+            db.collection("users").document(userId)
+                .collection("pinned_locations")
+                .document(pinnedLocationDocId!!)
+                .delete()
+                .addOnSuccessListener {
+                    Log.d("ARActivity", "Pinned location deleted: No rhizophora trees detected")
+                    Toast.makeText(this, "No rhizophora trees detected. Location not saved.", Toast.LENGTH_LONG).show()
+                }
+                .addOnFailureListener { e ->
+                    Log.e("ARActivity", "Failed to delete pinned location", e)
+                }
+        } else {
+            Log.d("ARActivity", "Pinned location kept: Rhizophora trees detected")
+        }
     }
 
     private fun goToDashboard() {
@@ -890,8 +922,18 @@ class ARActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Check if we need to cleanup pinned location when activity is destroyed
+        // Only if detection was started and we have a pinned location
+        if (::renderer.isInitialized && pinnedLocationDocId != null && detectionWasStarted) {
+            // Wait a moment for async operations, then check
+            Handler(Looper.getMainLooper()).postDelayed({
+                checkAndCleanupPinnedLocation()
+            }, 500)
+        }
         locationManager = null
-        renderer.onPause()
+        if (::renderer.isInitialized) {
+            renderer.onPause()
+        }
         arSession?.close()
         arSession = null
         trunkDetector?.close()

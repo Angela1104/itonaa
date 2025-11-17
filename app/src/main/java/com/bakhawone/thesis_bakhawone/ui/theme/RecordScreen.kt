@@ -1364,10 +1364,11 @@ fun DensityTrendChart(
         .maxOrNull() ?: 1.0
     
     val yAxisWidth = if (isSmallScreen) 45f else if (isTablet) 70f else 60f
-    val xAxisHeight = if (isSmallScreen) 50f else if (isTablet) 70f else 60f
+    val xAxisHeight = if (isSmallScreen) 70f else if (isTablet) 90f else 80f // Increased to accommodate year labels
     val chartPadding = if (isSmallScreen) 15f else if (isTablet) 25f else 20f
     val labelTextSize = if (isSmallScreen) 18f else if (isTablet) 28f else 24f
     val axisTextSize = if (isSmallScreen) 20f else if (isTablet) 32f else 28f
+    val yearTextSize = if (isSmallScreen) 16f else if (isTablet) 22f else 20f
     
     Canvas(modifier = modifier) {
         val width = size.width
@@ -1409,6 +1410,13 @@ fun DensityTrendChart(
             }
         }
         val monthCount = allMonthKeys.size
+        // Group months by year
+        val monthsByYear = allMonthKeys.groupBy { monthKey ->
+            val parts = monthKey.split("-")
+            parts.getOrNull(0)?.toIntOrNull() ?: 0
+        }
+        
+        // Draw month labels
         allMonthKeys.forEachIndexed { index, monthKey ->
             val x = chartStartX + (chartWidth * index / (monthCount - 1).coerceAtLeast(1))
             
@@ -1428,6 +1436,31 @@ fun DensityTrendChart(
                 canvas.nativeCanvas.drawText(monthLabel, x, labelY, paint)
             }
         }
+        
+        // Draw year labels below month labels, centered under each year's month range
+        monthsByYear.forEach { (year, yearMonths) ->
+            val yearMonthIndices = yearMonths.map { allMonthKeys.indexOf(it) }.filter { it >= 0 }
+            if (yearMonthIndices.isNotEmpty()) {
+                val firstIndex = yearMonthIndices.minOrNull() ?: 0
+                val lastIndex = yearMonthIndices.maxOrNull() ?: 0
+                val firstX = chartStartX + (chartWidth * firstIndex / (monthCount - 1).coerceAtLeast(1))
+                val lastX = chartStartX + (chartWidth * lastIndex / (monthCount - 1).coerceAtLeast(1))
+                val yearCenterX = (firstX + lastX) / 2f
+                
+                drawIntoCanvas { canvas ->
+                    val paint = android.graphics.Paint().apply {
+                        color = android.graphics.Color.GRAY
+                        textSize = yearTextSize
+                        textAlign = android.graphics.Paint.Align.CENTER
+                        isAntiAlias = true
+                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    }
+                    val yearLabelY = if (isSmallScreen) chartEndY + 55 else chartEndY + 60
+                    canvas.nativeCanvas.drawText(year.toString(), yearCenterX, yearLabelY, paint)
+                }
+            }
+        }
+        
         drawLine(
             color = axisColor,
             start = Offset(chartStartX, chartEndY),
@@ -1560,10 +1593,11 @@ fun MultiBarangayTrendChart(
         .maxOrNull() ?: 100
     
     val yAxisWidth = if (isSmallScreen) 45f else if (isTablet) 70f else 50f
-    val xAxisHeight = if (isSmallScreen) 50f else if (isTablet) 70f else 60f
+    val xAxisHeight = if (isSmallScreen) 70f else if (isTablet) 90f else 80f // Increased to accommodate year labels
     val chartPadding = if (isSmallScreen) 15f else if (isTablet) 25f else 20f
     val labelTextSize = if (isSmallScreen) 18f else if (isTablet) 28f else 24f
     val axisTextSize = if (isSmallScreen) 20f else if (isTablet) 32f else 28f
+    val yearTextSize = if (isSmallScreen) 16f else if (isTablet) 22f else 20f
     
     Canvas(modifier = modifier) {
         val width = size.width
@@ -1600,6 +1634,13 @@ fun MultiBarangayTrendChart(
             }
         }
         val monthCount = allMonthKeys.size
+        // Group months by year
+        val monthsByYear = allMonthKeys.groupBy { monthKey ->
+            val parts = monthKey.split("-")
+            parts.getOrNull(0)?.toIntOrNull() ?: 0
+        }
+        
+        // Draw month labels
         allMonthKeys.forEachIndexed { index, monthKey ->
             val x = chartStartX + (chartWidth * index / (monthCount - 1).coerceAtLeast(1))
             
@@ -1619,6 +1660,31 @@ fun MultiBarangayTrendChart(
                 canvas.nativeCanvas.drawText(monthLabel, x, labelY, paint)
             }
         }
+        
+        // Draw year labels below month labels, centered under each year's month range
+        monthsByYear.forEach { (year, yearMonths) ->
+            val yearMonthIndices = yearMonths.map { allMonthKeys.indexOf(it) }.filter { it >= 0 }
+            if (yearMonthIndices.isNotEmpty()) {
+                val firstIndex = yearMonthIndices.minOrNull() ?: 0
+                val lastIndex = yearMonthIndices.maxOrNull() ?: 0
+                val firstX = chartStartX + (chartWidth * firstIndex / (monthCount - 1).coerceAtLeast(1))
+                val lastX = chartStartX + (chartWidth * lastIndex / (monthCount - 1).coerceAtLeast(1))
+                val yearCenterX = (firstX + lastX) / 2f
+                
+                drawIntoCanvas { canvas ->
+                    val paint = android.graphics.Paint().apply {
+                        color = android.graphics.Color.GRAY
+                        textSize = yearTextSize
+                        textAlign = android.graphics.Paint.Align.CENTER
+                        isAntiAlias = true
+                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    }
+                    val yearLabelY = if (isSmallScreen) chartEndY + 55 else chartEndY + 60
+                    canvas.nativeCanvas.drawText(year.toString(), yearCenterX, yearLabelY, paint)
+                }
+            }
+        }
+        
         drawLine(
             color = axisColor,
             start = Offset(chartStartX, chartEndY),
