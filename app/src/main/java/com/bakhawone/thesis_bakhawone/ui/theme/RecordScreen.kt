@@ -1482,12 +1482,21 @@ fun DensityTrendChart(
         barangaysToShow.forEachIndexed { barangayIndex, barangay ->
             val color = colors[barangayIndex % colors.size]
             val data = barangayMonthData[barangay] ?: return@forEachIndexed
-            val points = allMonthKeys.mapIndexed { monthIndex, monthKey ->
+            var lastKnownAliveCount = 0
+            val points = mutableListOf<Offset>()
+            allMonthKeys.forEachIndexed { monthIndex, monthKey ->
                 val monthData = data.find { it.monthKey == monthKey }
-                val density = (monthData?.aliveCount ?: 0) / areaInSqm
+                // Use last known value if no data for this month, otherwise update last known value
+                val aliveCount = if (monthData != null) {
+                    lastKnownAliveCount = monthData.aliveCount
+                    monthData.aliveCount
+                } else {
+                    lastKnownAliveCount
+                }
+                val density = aliveCount / areaInSqm
                 val x = chartStartX + (chartWidth * monthIndex / (monthCount - 1).coerceAtLeast(1))
                 val y = chartEndY - (chartHeight * density.toFloat() / maxDensity.toFloat())
-                Offset(x, y)
+                points.add(Offset(x, y))
             }
             if (points.size > 1) {
                 // Create smooth curve using cubic bezier
@@ -1706,12 +1715,28 @@ fun MultiBarangayTrendChart(
         barangaysToShow.forEachIndexed { barangayIndex, barangay ->
             val color = colors[barangayIndex % colors.size]
             val data = barangayMonthData[barangay] ?: return@forEachIndexed
-            val points = allMonthKeys.mapIndexed { monthIndex, monthKey ->
+            var lastKnownAliveCount = 0
+            var lastKnownDeadCount = 0
+            val points = mutableListOf<Offset>()
+            allMonthKeys.forEachIndexed { monthIndex, monthKey ->
                 val monthData = data.find { it.monthKey == monthKey }
-                val total = (monthData?.aliveCount ?: 0) + (monthData?.deadCount ?: 0)
+                // Use last known values if no data for this month, otherwise update last known values
+                val aliveCount = if (monthData != null) {
+                    lastKnownAliveCount = monthData.aliveCount
+                    monthData.aliveCount
+                } else {
+                    lastKnownAliveCount
+                }
+                val deadCount = if (monthData != null) {
+                    lastKnownDeadCount = monthData.deadCount
+                    monthData.deadCount
+                } else {
+                    lastKnownDeadCount
+                }
+                val total = aliveCount + deadCount
                 val x = chartStartX + (chartWidth * monthIndex / (monthCount - 1).coerceAtLeast(1))
                 val y = chartEndY - (chartHeight * total / maxCount)
-                Offset(x, y)
+                points.add(Offset(x, y))
             }
             if (points.size > 1) {
                 // Create smooth curve using cubic bezier
